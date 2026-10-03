@@ -1,0 +1,3 @@
+mode: count
+github.com/acme/demo/board.go:4.1,6.2 2 7
+github.com/acme/demo/board.go:8.1,9.2 1 0

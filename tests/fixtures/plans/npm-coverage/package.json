@@ -1,0 +1,1 @@
+{"scripts": {"coverage": "mkdir -p coverage && node --test --experimental-test-coverage --test-reporter=lcov --test-reporter-destination=coverage/lcov.info"}}

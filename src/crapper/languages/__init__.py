@@ -1,27 +1,16 @@
-"""Per-language function extraction."""
+from pathlib import Path
+from typing import Final
 
-from crapper.languages.clojure import ClojureFactory
-from crapper.languages.golang import GoFactory
-from crapper.languages.java import JavaFactory
-from crapper.languages.language import LanguageFactory, UnknownFactory
-from crapper.languages.python import PythonFactory
-from crapper.languages.rust import RustFactory
-from crapper.languages.typescript import TypeScriptFactory
-from crapper.model import Function
+from crapper.language import Language
+from crapper.languages.clojure import CLOJURE
+from crapper.languages.go import GO
+from crapper.languages.java import JAVA
+from crapper.languages.python import PYTHON
+from crapper.languages.rust import RUST
+from crapper.languages.typescript import TYPESCRIPT
 
-_FACTORIES: dict[str, LanguageFactory] = {
-    "clojure": ClojureFactory(),
-    "java": JavaFactory(),
-    "go": GoFactory(),
-    "typescript": TypeScriptFactory(),
-    "python": PythonFactory(),
-    "rust": RustFactory(),
-}
-_UNKNOWN = UnknownFactory()
+LANGUAGES: Final = (CLOJURE, GO, JAVA, PYTHON, RUST, TYPESCRIPT)
 
 
-def functions_in_file(
-    language: str, source: str, path: str, project_root: str
-) -> list[Function]:
-    factory = _FACTORIES.get(language, _UNKNOWN)
-    return factory.create().functions(source, path, project_root)
+def language_of(path: Path) -> Language | None:
+    return next((language for language in LANGUAGES if language.owns(path)), None)

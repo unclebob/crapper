@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!DOCTYPE report PUBLIC "-//JACOCO//DTD Report 1.1//EN" "report.dtd">
+<report name="demo">
+  <package name="demo">
+    <sourcefile name="Board.java">
+      <line nr="4" mi="0" ci="6" mb="0" cb="0"/>
+      <line nr="5" mi="0" ci="4" mb="1" cb="3"/>
+      <line nr="6" mi="0" ci="2" mb="0" cb="0"/>
+      <counter type="LINE" missed="0" covered="3"/>
+    </sourcefile>
+  </package>
+  <package name="demo/pkg">
+    <sourcefile name="Board.java">
+      <line nr="4" mi="1" ci="3" mb="0" cb="0"/>
+      <line nr="9" mi="0" ci="2" mb="0" cb="0"/>
+    </sourcefile>
+  </package>
+</report>

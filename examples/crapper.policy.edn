@@ -4,15 +4,16 @@
  :src "src"
  :out "examples/crapper.edn"
  :hierarchical true
- :foreign [dataclasses functools json os pathlib re shlex shutil subprocess sys
-           tree_sitter_language_pack urllib xml]
+ :foreign [collections cyclopts datetime enum fnmatch functools itertools json
+           operator os pathlib pydantic re rich shlex shutil subprocess sys tomllib
+           tree_sitter tree_sitter_language_pack typing urllib xml]
  :order [model discover crapper
-         crap coverage metrics report languages
-         analyze runners
+         coverage report languages
+         analyze runners viewer
          cli
          __main__]
  :levels [[model discover crapper]
-          [crap coverage metrics report languages]
-          [analyze runners]
+          [coverage report languages]
+          [analyze runners viewer]
           [cli]
           [__main__]]}

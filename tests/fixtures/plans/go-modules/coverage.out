@@ -1,0 +1,5 @@
+mode: set
+example.com/demo/main.go:1.1,2.2 1 1
+example.com/demo/sub/main.go:1.1,2.2 1 0
+example.com/demo/tools/main.go:1.1,2.2 1 0
+example.com/other/main.go:1.1,2.2 1 0

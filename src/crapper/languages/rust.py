@@ -1,199 +1,118 @@
-"""Rust functions and cyclomatic complexity.
+import tomllib
+from pathlib import Path
+from shutil import which
+from typing import Final
 
-Decision points are `if` / `if let`, `for`, `while` / `while let`, `loop`,
-each `match` arm, `?`, and `&&` / `||`. Free functions are namespaced by the
-module path (`crate::foo::bar`). Methods are namespaced by the self type
-(`crate::foo::Widget`) so uml-viewer can join them to that type. Bodies inside
-`mod tests` are test code and are not scored.
+from tree_sitter import Node
+
+from crapper.coverage.formats import LCOV, LCOV_REPORTS, Lines
+from crapper.coverage.tool import Argv, run
+from crapper.decode import ForeignDocument
+from crapper.language import Language, Project
+from crapper.languages.treesitter import Grammar, enclosing, find, text
+from crapper.model import Source
+
+_NAME: Final = "rust"
+_LLVM_COV = ("cargo", "llvm-cov")
+_TARPAULIN = ("cargo", "tarpaulin")
+_INSTALL = (
+    ("rustup", "component", "add", "llvm-tools-preview"),
+    ("cargo", "install", "cargo-llvm-cov", "--locked"),
+)
+_MODULE = frozenset({"mod_item"})
+_ROOTS = {"lib", "main"}
+_NAMED_TYPES = {"type_identifier", "generic_type", "scoped_type_identifier"}
+_TYPE = "(type_identifier) @found"
+_QUERY = """
+(function_item name: (_) @name body: (_)) @definition
+[
+  (if_expression)
+  (for_expression)
+  (while_expression)
+  (loop_expression)
+  (match_arm)
+  (try_expression)
+  (binary_expression operator: ["&&" "||"])
+] @decision
 """
 
-import re
-from pathlib import Path
 
-from crapper.languages.treesitter import (
-    binary_logic,
-    child_of_type,
-    complexity,
-    descendants,
-    end_line,
-    node_text,
-    parse,
-    start_line,
-)
-from crapper.languages.language import Language, LanguageFactory
-from crapper.model import Function
-
-_DECISIONS = {
-    "if_expression",
-    "for_expression",
-    "while_expression",
-    "loop_expression",
-    "match_arm",
-    "try_expression",
-}
-_PACKAGE_BLOCK = re.compile(r"(?ms)^\[package\](.*?)(?:^\[|\Z)")
-_NAME = re.compile(r'(?m)^name\s*=\s*"([^"]+)"')
+class CargoPackage(ForeignDocument):
+    name: str
 
 
-def _is_decision(node) -> bool:
-    return node.type in _DECISIONS or binary_logic(node)
+class CargoManifest(ForeignDocument):
+    package: CargoPackage | None = None
 
 
-def _skip(_node) -> bool:
-    return False
+def _crate(manifest: Path) -> str | None:
+    package = CargoManifest.read(manifest, tomllib.loads).package
+    return package.name.replace("-", "_") if package else None
 
 
-def _has_block(node) -> bool:
-    return child_of_type(node, "block") is not None
-
-
-def _ancestor_mods(data: bytes, node) -> list[str]:
-    names: list[str] = []
-    current = node.parent
-    while current is not None:
-        if current.type == "mod_item":
-            ident = child_of_type(current, "identifier")
-            if ident is not None:
-                names.append(node_text(data, ident))
-        current = current.parent
-    names.reverse()
-    return names
-
-
-def _in_mod_named(data: bytes, node, name: str) -> bool:
-    return name in _ancestor_mods(data, node)
-
-
-def _impl_type(data: bytes, impl) -> str | None:
-    saw_for = False
-    chosen = None
-    for child in impl.children:
-        if child.type == "for":
-            saw_for = True
-            chosen = None
-            continue
-        if child.type in {"type_identifier", "generic_type", "scoped_type_identifier"}:
-            if child.type == "type_identifier":
-                chosen = node_text(data, child)
-            else:
-                ident = child_of_type(child, "type_identifier")
-                if ident is None:
-                    for item in descendants(child):
-                        if item.type == "type_identifier":
-                            ident = item
-                            break
-                chosen = node_text(data, ident) if ident is not None else None
-            if saw_for:
-                return chosen
-    return chosen
-
-
-def _crate_name(path: str) -> tuple[str, Path | None]:
-    current = Path(path).resolve().parent
-    while True:
-        cargo = current / "Cargo.toml"
-        if cargo.is_file():
-            text = cargo.read_text(encoding="utf-8")
-            block = _PACKAGE_BLOCK.search(text)
-            if block:
-                match = _NAME.search(block.group(1))
-                name = match.group(1) if match else current.name
-                return name.replace("-", "_"), current
-        if current.parent == current:
-            break
-        current = current.parent
-    return "crate", None
-
-
-def _file_modules(path: str, crate_name: str, crate_root: Path | None) -> list[str]:
-    file_path = Path(path).resolve()
-    if crate_root is None:
-        return [crate_name, file_path.stem] if file_path.stem not in {"lib", "main"} else [crate_name]
-    try:
-        relative = file_path.relative_to(crate_root).as_posix()
-    except ValueError:
-        return [crate_name]
-    if relative.startswith("src/"):
-        relative = relative[4:]
-    if relative in {"lib.rs", "main.rs"}:
-        return [crate_name]
-    parts = relative.split("/")
-    if parts[-1] == "mod.rs":
-        parts = parts[:-1]
-    elif parts[-1].endswith(".rs"):
-        parts[-1] = parts[-1][:-3]
-    if parts[:1] == ["bin"] and len(parts) >= 2:
-        return parts[1:]
-    return [crate_name, *parts]
-
-
-def _namespace(modules: list[str], extra: list[str], type_name: str | None) -> str:
-    parts = [*modules, *extra]
-    if type_name:
-        parts.append(type_name)
-    return "::".join(part for part in parts if part)
-
-
-def _absolute(path: str, project_root: str | None) -> str:
-    file_path = Path(path)
-    if file_path.is_absolute():
-        return str(file_path)
-    if project_root:
-        return str((Path(project_root) / file_path).resolve())
-    return str(file_path.resolve())
-
-
-def _impl_owner(data: bytes, node):
-    parent = node.parent
-    if parent is None or parent.type != "declaration_list":
-        return None
-    owner = parent.parent
-    if owner is None or owner.type != "impl_item":
-        return None
-    return _impl_type(data, owner)
-
-
-def _record_function(data: bytes, node, modules: list[str], path: str) -> Function | None:
-    if node.type != "function_item" or not _has_block(node):
-        return None
-    if node.parent is not None and node.parent.type == "block":
-        return None
-    if _in_mod_named(data, node, "tests"):
-        return None
-    ident = child_of_type(node, "identifier")
-    if ident is None:
-        return None
-    return Function(
-        name=node_text(data, ident),
-        namespace=_namespace(modules, _ancestor_mods(data, node), _impl_owner(data, node)),
-        complexity=complexity(node, _is_decision, _skip),
-        start_line=start_line(node),
-        end_line=end_line(node),
-        path=path,
-        language="rust",
+def _module(source: Source, _: Node) -> tuple[str, ...]:
+    file = source.path
+    qualified = source.home.qualified(file)
+    crate, *directories = qualified.parent.parts if qualified else ("crate",)
+    package = directories[1:] if directories[:1] == ["src"] else directories
+    if not package and file.stem in _ROOTS:
+        return (crate,)
+    modules = (*package, *(() if file.stem == "mod" else (file.stem,)))
+    return (
+        modules[1:]
+        if modules[:1] == ("bin",) and len(modules) > 1
+        else (crate, *modules)
     )
 
 
-def functions_in_source(
-    source: str, path: str, project_root: str | None = None
-) -> list[Function]:
-    data, tree = parse(source, "rust")
-    located = _absolute(path, project_root)
-    crate_name, crate_root = _crate_name(located)
-    modules = _file_modules(located, crate_name, crate_root)
-    found: list[Function] = []
-    for node in descendants(tree.root_node):
-        recorded = _record_function(data, node, modules, path)
-        if recorded is not None:
-            found.append(recorded)
-    return found
+def _self_type(method: Node) -> list[str]:
+    implementation = method.parent.parent if method.parent else None
+    if implementation is None or implementation.type != "impl_item":
+        return []
+    implemented = implementation.child_by_field_name("type")
+    if implemented is None or implemented.type not in _NAMED_TYPES:
+        return []
+    return [text(name) for name in find(_NAME, implemented, _TYPE)[:1]]
 
 
-class Rust(Language):
-    def functions(self, source: str, path: str, project_root: str) -> list[Function]:
-        return functions_in_source(source, path, project_root)
+def _scope(item: Node) -> list[str] | None:
+    modules = enclosing(item, _MODULE)
+    local = item.parent is not None and item.parent.type == "block"
+    return None if local or "tests" in modules else [*modules, *_self_type(item)]
 
 
-class RustFactory(LanguageFactory):
-    def create(self) -> Language:
-        return Rust()
+_GRAMMAR = Grammar(
+    name=_NAME, query=_QUERY, separator="::", module=_module, scope=_scope
+)
+
+
+def _installed(tool: Argv) -> bool:
+    return which("-".join(tool)) is not None
+
+
+def ready(root: Path) -> bool:
+    return any(map(_installed, (_LLVM_COV, _TARPAULIN))) or all(
+        run(step, root) for step in _INSTALL
+    )
+
+
+def measure(project: Project, scratch: Path) -> list[Lines]:
+    command = (
+        [*_TARPAULIN, "--out", "Lcov", "--output-dir", f"{scratch}"]
+        if _installed(_TARPAULIN) and not _installed(_LLVM_COV)
+        else [*_LLVM_COV, "--lcov", "--output-path", f"{scratch / LCOV.name}"]
+    )
+    run(command, project.home.directory)
+    return [LCOV.read(scratch)]
+
+
+RUST = Language(
+    name=_NAME,
+    extensions=(".rs",),
+    manifests=("Cargo.toml",),
+    project_name=_crate,
+    functions=_GRAMMAR.functions,
+    ready=ready,
+    measure=measure,
+    reports=LCOV_REPORTS,
+)

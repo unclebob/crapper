@@ -1,0 +1,3 @@
+(defn foo []
+  ;; comment
+  "hello")

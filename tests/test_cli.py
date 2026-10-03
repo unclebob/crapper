@@ -1,294 +1,216 @@
+import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
-from crapper.cli import _changed_files, _positionals, _take, main, parse_args, run
-from crapper.discover import language_of
+from crapper.render import SNAPSHOT
+from crapper.selection import select
+from support import (
+    FIXTURES,
+    POLYGLOT,
+    POLYGLOT_SOURCES,
+    REPORTS,
+    Crapper,
+    Project,
+    scores,
+)
+
+UNMEASURED = [
+    "demo.Board place 3 None None",
+    "demo Place 2 None None",
+    "demo open 2 None None",
+    "demo.core choose 2 None None",
+    "demo.tool run 2 None None",
+    "ui.view view 2 None None",
+]
+MEASURED = [
+    "demo open 2 0.0 6.0",
+    "demo.Board place 3 100.0 3.0",
+    "demo Place 2 50.0 2.5",
+    "demo.tool run 2 50.0 2.5",
+    "demo.core choose 2 75.0 2.0625",
+    "ui.view view 2 100.0 2.0",
+]
 
 
-def test_language_detection():
-    assert language_of("src/app/core.clj") == "clojure"
-    assert language_of("src/app/core.cljc") == "clojure"
-    assert language_of("Widget.java") == "java"
-    assert language_of("board.go") == "go"
-    assert language_of("ui/view.tsx") == "typescript"
-    assert language_of("src/app.js") == "typescript"
-    assert language_of("src/app.mjs") == "typescript"
-    assert language_of("src/app.cjs") == "typescript"
-    assert language_of("src/app.jsx") == "typescript"
-    assert language_of("src/lib.rs") == "rust"
-    assert language_of("src/crapper/cli.py") == "python"
-    assert language_of("types.d.ts") is None
-    assert language_of("notes.md") is None
+@pytest.fixture
+def polyglot(project: Project) -> Path:
+    return project("polyglot")
 
 
-def _write(root: Path, relative: str, source: str) -> None:
-    path = root / relative
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(source, encoding="utf-8")
-
-
-def test_project_snapshot_is_readable_as_crap4clj_edn(tmp_path):
-    _write(
-        tmp_path,
-        "src/demo/core.clj",
-        "(ns demo.core)\n\n(defn choose [x]\n  (if x 1 0))\n",
+def git(root: Path, *args: str) -> None:
+    config = (
+        "user.name=crapper",
+        "user.email=crapper@example.com",
+        "commit.gpgsign=false",
     )
-    _write(
-        tmp_path,
-        "src/demo/Board.java",
-        "package demo;\npublic class Board {\n  public int place(int x) {\n    if (x > 0 && ready) return 1;\n    return 0;\n  }\n}\n",
+    options = [option for value in config for option in ("-c", value)]
+    subprocess.run(
+        ["git", "-C", root, *options, *args], check=True, capture_output=True
     )
-    _write(
-        tmp_path,
-        "board.go",
-        "package demo\n\nfunc Place(x int) int {\n\tif x > 0 {\n\t\treturn x\n\t}\n\treturn 0\n}\n",
-    )
-    _write(
-        tmp_path,
-        "src/ui/view.ts",
-        "export function view(ok: boolean): number {\n  return ok ? 1 : 0;\n}\n",
-    )
-    _write(tmp_path, "Cargo.toml", '[package]\nname = "demo"\nversion = "0.1.0"\n')
-    _write(
-        tmp_path,
-        "src/lib.rs",
-        "pub fn open(ok: bool) -> i32 { if ok { 1 } else { 0 } }\n",
-    )
-    _write(tmp_path, "src/demo/core_test.clj", "(ns demo.core-test)\n(defn should-skip [] 1)\n")
-    _write(tmp_path, "board_test.go", "package demo\nfunc TestPlace(t *testing.T) {}\n")
 
-    code = run(["--root", str(tmp_path), "--no-coverage"])
-    assert code == 0
-    text = (tmp_path / ".metrics" / "crap.edn").read_text(encoding="utf-8")
-    assert ':namespace "demo.core"' in text
-    assert ':name "choose"' in text
-    assert ':namespace "demo.Board"' in text
-    assert ':name "place"' in text
-    assert ':namespace "demo"' in text and ':name "Place"' in text
-    assert ':namespace "ui.view"' in text
-    assert ':namespace "demo"' in text and ':name "open"' in text
-    assert "should-skip" not in text
-    assert "TestPlace" not in text
 
+def selected(root: Path, *targets: str, changed: bool = False) -> list[Path]:
+    found = select(root, targets, (), changed=changed)
+    return sorted(file for project in found for file in project.files)
+
+
+def test_every_language_is_scored_and_tests_are_left_out(
+    polyglot: Path, crapper: Crapper
+) -> None:
+    outcome = crapper("--root", polyglot, "--coverage", "none")
+    assert (outcome.code, outcome.err) == (0, f"Wrote {polyglot / SNAPSHOT}\n")
+    assert scores(polyglot) == UNMEASURED
+
+
+@pytest.mark.skipif(shutil.which("bb") is None, reason="needs babashka")
+def test_the_snapshot_is_readable_by_a_clojure_reader(
+    polyglot: Path, crapper: Crapper
+) -> None:
+    crapper("--root", polyglot, "--coverage", "none")
     reader = subprocess.run(
-        [
-            "bb",
-            "-e",
-            (
-                "(require '[clojure.edn :as edn])"
-                "(let [data (edn/read-string (slurp *in*))]"
-                " (doseq [entry (:entries data)]"
-                "   (println (:namespace entry) (:name entry)"
-                "            (:complexity entry) (pr-str (:coverage entry)))))"
-            ),
-        ],
-        input=text,
+        ["bb", FIXTURES / "read_snapshot.clj"],
+        input=(polyglot / SNAPSHOT).read_text(encoding="utf-8"),
         text=True,
         capture_output=True,
-        check=False,
+        check=True,
     )
-    assert reader.returncode == 0, reader.stderr
-    assert "demo.core choose 2 nil" in reader.stdout
-    assert "demo.Board place 3 nil" in reader.stdout
+    assert reader.stdout == "".join(f"{line}\n" for line in UNMEASURED).replace("None", "nil")  # fmt: skip
 
 
-def test_existing_coverage_feeds_the_snapshot(tmp_path):
-    _write(
-        tmp_path,
-        "src/demo/core.clj",
-        "(ns demo.core)\n\n(defn choose [x]\n  (if x 1 0))\n",
-    )
-    lcov = tmp_path / "target" / "coverage" / "lcov.info"
-    lcov.parent.mkdir(parents=True)
-    lcov.write_text(
-        "SF:src/demo/core.clj\nDA:3,1\nDA:4,1\nend_of_record\n",
-        encoding="utf-8",
-    )
-    code = run(
-        ["--root", str(tmp_path), "--use-existing-coverage", "src/demo/core.clj"]
-    )
-    assert code == 0
-    text = (tmp_path / ".metrics" / "crap.edn").read_text(encoding="utf-8")
-    assert ":coverage 100.0" in text
-    assert ":crap 2.0" in text
+@pytest.mark.parametrize(
+    ("argv", "code", "expected"),
+    [
+        ([], 0, MEASURED),
+        (["--threshold", "6"], 0, MEASURED),
+        (["--threshold", "1"], 2, MEASURED),
+        (["src/demo/core.clj"], 0, MEASURED[4:5]),
+        (["--threshold", "2", "src/demo/core.clj"], 2, MEASURED[4:5]),
+    ],
+)
+def test_existing_reports_feed_the_snapshot_and_the_threshold(
+    polyglot: Path, crapper: Crapper, argv: list[str], code: int, expected: list[str]
+) -> None:
+    assert crapper("--root", polyglot, "--coverage", "existing", *argv).code == code
+    assert scores(polyglot) == expected
 
 
-def test_threshold_exits_when_the_worst_score_is_too_high(tmp_path):
-    _write(tmp_path, "src/demo/core.clj", "(ns demo.core)\n\n(defn choose [x]\n  (if x 1 0))\n")
-    lcov = tmp_path / "target" / "coverage" / "lcov.info"
-    lcov.parent.mkdir(parents=True)
-    lcov.write_text("SF:src/demo/core.clj\nDA:3,0\nDA:4,0\nend_of_record\n", encoding="utf-8")
-    code = run(
-        [
-            "--root",
-            str(tmp_path),
-            "--use-existing-coverage",
-            "--threshold",
-            "1",
-        ]
-    )
-    assert code == 2
+@pytest.mark.parametrize(
+    ("argv", "expected"),
+    [
+        (["--source-root", "src"], [UNMEASURED[0], *UNMEASURED[2:]]),
+        (["src"], [UNMEASURED[0], *UNMEASURED[2:]]),
+        (["src/demo/core.clj", "core"], UNMEASURED[3:4]),
+        (["src/demo/core.clj"], UNMEASURED[3:4]),
+    ],
+)
+def test_targets_and_source_roots_narrow_what_is_scored(
+    polyglot: Path, crapper: Crapper, argv: list[str], expected: list[str]
+) -> None:
+    assert crapper("--root", polyglot, "--coverage", "none", *argv).code == 0
+    assert scores(polyglot) == expected
 
 
-def test_help_and_unknown_option(capsys):
-    assert run(["--help"]) == 0
-    assert "uml-viewer" in capsys.readouterr().out
-    assert run(["--not-an-option"]) == 1
-    assert run(["--root"]) == 1
-    assert run(["--threshold", "nope"]) == 1
-    assert run(["--no-coverage", "--coverage-command", "true"]) == 1
+def test_nothing_is_written_when_no_source_is_selected(
+    polyglot: Path, crapper: Crapper
+) -> None:
+    outcome = crapper("--root", polyglot, "--coverage", "none", "notes.md")
+    assert (outcome.code, outcome.out) == (0, "No source files to analyze.\n")
+    assert not (polyglot / SNAPSHOT).exists()
 
 
-def test_selects_directories_filters_and_changed_files(tmp_path, monkeypatch, capsys):
-    _write(tmp_path, "src/demo/core.clj", "(ns demo.core)\n\n(defn choose [x]\n  (if x 1 0))\n")
-    _write(tmp_path, "notes.md", "not source\n")
-    assert run(["--root", str(tmp_path), "--no-coverage", "--source-root", "src"]) == 0
-    assert run(["--root", str(tmp_path), "--no-coverage", "src"]) == 0
-    assert run(["--root", str(tmp_path), "--no-coverage", "src/demo/core.clj", "core"]) == 0
-    assert run(["--root", str(tmp_path), "--no-coverage", "notes.md"]) == 0
-    assert "No source files" in capsys.readouterr().out
-
-    class Result:
-        returncode = 0
-        stdout = ' M src/demo/core.clj\nR  old.clj -> src/demo/core.clj\n?? "src/demo/core.clj"\n'
-        stderr = ""
-
-    monkeypatch.setattr("crapper.cli.subprocess.run", lambda *args, **kwargs: Result())
-    assert run(["--root", str(tmp_path), "--no-coverage", "--changed"]) == 0
-
-    class Failed:
-        returncode = 1
-        stdout = ""
-        stderr = "git failed"
-
-    monkeypatch.setattr("crapper.cli.subprocess.run", lambda *args, **kwargs: Failed())
-    assert run(["--root", str(tmp_path), "--no-coverage", "--changed"]) == 0
+def test_relative_targets_resolve_under_the_root() -> None:
+    assert selected(POLYGLOT, "src/demo/core.clj") == [POLYGLOT / "src/demo/core.clj"]
 
 
-def test_run_asks_for_coverage_when_it_is_enabled(tmp_path, monkeypatch):
-    _write(tmp_path, "src/demo/core.clj", "(ns demo.core)\n\n(defn choose [x]\n  x)\n")
-    called = []
-    monkeypatch.setattr("crapper.cli.run_coverage", lambda *args: called.append(args))
-    assert run(["--root", str(tmp_path), "--coverage-command", "true"]) == 0
-    assert called
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--not-an-option"],
+        ["--root"],
+        ["--threshold", "nope"],
+        ["--coverage", "none", "--coverage-command", "true"],
+    ],
+    ids=" ".join,
+)
+def test_a_usage_error_exits_with_one(crapper: Crapper, argv: list[str]) -> None:
+    assert crapper(*argv).code == 1
 
 
-def test_empty_option_value_is_rejected():
-    with pytest.raises(ValueError, match="requires a value"):
-        _take(["ok", "--opt", ""], 1, "--opt")
-    with pytest.raises(ValueError, match="requires a value"):
-        _take(["--opt", "-1"], 0, "--opt")
+def test_an_unreadable_report_is_named_and_exits_with_one(
+    polyglot: Path, crapper: Crapper
+) -> None:
+    report = polyglot / "target/coverage/go/coverage.out"
+    shutil.copy(REPORTS / "broken.out", report)
+    outcome = crapper("--root", polyglot, "--coverage", "existing")
+    assert outcome.code == 1
+    assert outcome.err.startswith(f"{report}: invalid Go coverage block")
 
 
-def test_parse_args_reads_the_process_arguments_after_the_program(monkeypatch):
-    monkeypatch.setattr(sys, "argv", ["crapper", "--threshold", "5"])
-    options = parse_args()
-    assert options.threshold == 5.0
-    assert options.positionals == []
-    assert options.action == "analyze"
+def test_a_target_outside_the_root_is_refused(polyglot: Path, crapper: Crapper) -> None:
+    root, board = polyglot / "src", polyglot / "board.go"
+    outcome = crapper("--root", root, "--coverage", "none", board)
+    assert (outcome.code, outcome.err) == (1, f"{board} is outside {root}\n")
 
 
-def test_flags_that_only_store_a_boolean():
-    assert parse_args(["--use-existing-coverage"]).use_existing_coverage is True
-    assert parse_args(["--changed"]).changed is True
-    assert parse_args(["--no-coverage"]).no_coverage is True
-    conflict = parse_args(["--no-coverage", "--coverage-command", "true"])
-    assert conflict.exit_code == 1
+def test_changed_outside_a_repository_exits_with_the_status_of_git(
+    polyglot: Path, crapper: Crapper
+) -> None:
+    assert crapper("--root", polyglot, "--changed").code == 128
 
 
-def test_changed_files_follow_git_status(tmp_path, monkeypatch, capsys):
-    seen = {}
+def test_help_describes_the_tool(crapper: Crapper) -> None:
+    outcome = crapper("--help")
+    assert outcome.code == 0
+    assert "uml-viewer" in outcome.out
 
-    class Result:
-        returncode = 0
-        stdout = "\nM  x\n?? sources/keep.py\n"
-        stderr = ""
 
-    def fake(*_args, **kwargs):
-        seen.update(kwargs)
-        return Result()
+def test_coverage_is_run_per_language_by_default(
+    polyglot: Path, crapper: Crapper
+) -> None:
+    outcome = crapper("--root", polyglot, "src/demo/core.clj")
+    assert outcome.code == 0
+    assert f"clj failed in {polyglot}." in outcome.err
+    assert scores(polyglot) == ["demo.core choose 2 0.0 6.0"]
 
-    monkeypatch.setattr("crapper.cli.subprocess.run", fake)
-    found = _changed_files(tmp_path)
-    assert seen["check"] is False
-    assert seen["capture_output"] is True
-    assert seen["text"] is True
-    assert found == [
-        (tmp_path / "x").resolve(),
-        (tmp_path / "sources" / "keep.py").resolve(),
+
+def test_a_coverage_command_runs_before_its_reports_are_read(
+    project: Project, crapper: Crapper
+) -> None:
+    root = project("staged")
+    command = "mkdir -p target/coverage && cp made.info target/coverage/lcov.info"
+    assert crapper("--root", root, "--coverage-command", command).code == 0
+    assert scores(root) == ["demo.core choose 2 100.0 2.0"]
+
+
+def test_changed_files_follow_git_status(polyglot: Path) -> None:
+    with pytest.raises(subprocess.CalledProcessError, match="status 128"):
+        selected(polyglot, changed=True)
+    git(polyglot, "init")
+    assert selected(polyglot, changed=True) == [
+        polyglot / file for file in POLYGLOT_SOURCES
     ]
-
-    class Failed:
-        returncode = 1
-        stdout = "?? sources/keep.py\n"
-        stderr = "git failed"
-
-    monkeypatch.setattr("crapper.cli.subprocess.run", lambda *_a, **_k: Failed())
-    assert _changed_files(tmp_path) == []
-    assert capsys.readouterr().err.strip() == "git failed"
-
-    class Silent:
-        returncode = 1
-        stdout = ""
-        stderr = ""
-
-    monkeypatch.setattr("crapper.cli.subprocess.run", lambda *_a, **_k: Silent())
-    assert _changed_files(tmp_path) == []
-    assert capsys.readouterr().err.strip() == "git status failed"
+    git(polyglot, "add", ".")
+    git(polyglot, "commit", "-m", "everything")
+    assert selected(polyglot, changed=True) == []
 
 
-def test_relative_paths_are_resolved_under_the_project_root(tmp_path):
-    _write(tmp_path, "src/demo/core.clj", "(ns demo.core)\n\n(defn choose [x]\n  (if x 1 0))\n")
-    existing, filters = _positionals(tmp_path, ["src/demo/core.clj"])
-    assert existing == [(tmp_path / "src/demo/core.clj").resolve()]
-    assert filters == []
-    assert run(["--root", str(tmp_path), "--no-coverage", "src/demo/core.clj"]) == 0
-    text = (tmp_path / ".metrics" / "crap.edn").read_text(encoding="utf-8")
-    assert ':name "choose"' in text
-    assert "parse_args" not in text
+def test_a_tests_directory_above_the_root_does_not_hide_the_project(
+    polyglot: Path,
+) -> None:
+    root = polyglot.rename(polyglot.with_name("tests"))
+    sources = [root / file for file in POLYGLOT_SOURCES]
+    assert selected(root) == sources
+    git(root, "init")
+    assert selected(root, changed=True) == sources
 
 
-def test_changed_selection_ignores_files_git_did_not_name(tmp_path, monkeypatch, capsys):
-    _write(tmp_path, "src/kept.clj", "(ns demo.kept)\n\n(defn kept [] 1)\n")
-    _write(tmp_path, "src/other.clj", "(ns demo.other)\n\n(defn other [] 1)\n")
-
-    class Result:
-        returncode = 0
-        stdout = "?? src/kept.clj\n"
-        stderr = ""
-
-    monkeypatch.setattr("crapper.cli.subprocess.run", lambda *_a, **_k: Result())
-    assert run(["--root", str(tmp_path), "--no-coverage", "--changed"]) == 0
-    text = (tmp_path / ".metrics" / "crap.edn").read_text(encoding="utf-8")
-    assert ':name "kept"' in text
-    assert "other" not in text
-    assert "No source files" not in capsys.readouterr().out
-
-
-def test_threshold_equal_to_the_score_is_allowed(tmp_path):
-    _write(tmp_path, "src/demo/core.clj", "(ns demo.core)\n\n(defn choose [] 1)\n")
-    lcov = tmp_path / "target" / "coverage" / "lcov.info"
-    lcov.parent.mkdir(parents=True)
-    lcov.write_text("SF:src/demo/core.clj\nDA:1,1\nDA:3,1\nend_of_record\n", encoding="utf-8")
-    code = run(
-        ["--root", str(tmp_path), "--use-existing-coverage", "--threshold", "1", "src/demo/core.clj"]
-    )
-    assert code == 0
-
-
-def test_threshold_with_no_scores_does_not_call_max_on_an_empty_list(tmp_path):
-    _write(tmp_path, "src/demo/core.clj", "(ns demo.core)\n\n(defn choose [] 1)\n")
-    assert run(["--root", str(tmp_path), "--no-coverage", "--threshold", "1"]) == 0
-
-
-def test_main_exits_with_the_status(monkeypatch):
-    monkeypatch.setattr("crapper.cli.run", lambda _argv=None: 4)
-    try:
-        main(["--help"])
-    except SystemExit as exc:
-        assert exc.code == 4
-    else:
-        raise AssertionError("main did not exit")
+def test_only_changed_files_are_scored(polyglot: Path, crapper: Crapper) -> None:
+    git(polyglot, "init")
+    git(polyglot, "add", ".")
+    git(polyglot, "commit", "-m", "everything")
+    shutil.copy(polyglot / "src/lib.rs", polyglot / "src/extra.rs")
+    outcome = crapper("--root", polyglot, "--coverage", "none", "--changed")
+    assert (outcome.code, scores(polyglot)) == (0, ["demo::extra open 2 None None"])
+    assert "No source files" not in outcome.out

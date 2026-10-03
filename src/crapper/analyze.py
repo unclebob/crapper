@@ -1,47 +1,35 @@
-"""Turn source files and coverage into CRAP entries."""
+from collections.abc import Iterable, Sequence
 
-from pathlib import Path
-
-from crapper.coverage import CoverageBundle
-from crapper.crap import make_entry, sort_entries
-from crapper.discover import language_of
-from crapper.languages import functions_in_file
-from crapper.model import Entry, Function
+from crapper.coverage.formats import Segment
+from crapper.coverage.measure import Coverage
+from crapper.language import Project
+from crapper.model import Entry, Function, Scored, Source, Unmeasured
 
 
-def _coverage(bundle: CoverageBundle | None, function: Function) -> float | None:
-    """Percentage for one function.
-
-    None means coverage was not requested (`--no-coverage`). A function the
-    report does not mention scores 0%, so it sorts with the other scores
-    instead of sinking to the bottom as N/A.
-    """
-
-    if bundle is None:
-        return None
-    found = bundle.percent_for(function)
-    if found is None:
-        return 0.0
-    return found
+def _worst_first(entry: Entry) -> tuple[bool, float, str, str]:
+    function = entry.function
+    match entry:
+        case Scored(crap=crap):
+            return False, -crap, function.namespace, function.name
+        case Unmeasured():
+            return True, -function.complexity, function.namespace, function.name
 
 
-def analyze_files(
-    files: list[Path],
-    project_root: Path,
-    bundle: CoverageBundle | None,
-) -> list[Entry]:
-    root = project_root.resolve()
-    entries: list[Entry] = []
-    for file in files:
-        file = file.resolve()
-        language = language_of(file)
-        if language is None:
-            continue
-        source = file.read_text(encoding="utf-8", errors="replace")
-        try:
-            relative = file.relative_to(root).as_posix()
-        except ValueError:
-            relative = file.as_posix()
-        for function in functions_in_file(language, source, relative, str(root)):
-            entries.append(make_entry(function, _coverage(bundle, function)))
-    return sort_entries(entries)
+def _entry(function: Function, segments: Iterable[Segment] | None) -> Entry:
+    if segments is None:
+        return Unmeasured(function=function)
+    within = [segment for segment in segments if segment.span.overlaps(function.span)]
+    counted = [segment for segment in within if segment.branch] or within
+    covered = sum(segment.covered for segment in counted)
+    total = covered + sum(segment.missed for segment in counted)
+    return Scored(function=function, coverage=100 * covered / total if total else 0.0)
+
+
+def analyze(projects: Sequence[Project], coverage: Coverage | None) -> list[Entry]:
+    entries = (
+        _entry(function, None if coverage is None else coverage.get(file, ()))
+        for project in projects
+        for file in project.files
+        for function in project.language.functions(Source(home=project.home, path=file))
+    )
+    return sorted(entries, key=_worst_first)

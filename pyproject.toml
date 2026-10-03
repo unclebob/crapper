@@ -5,17 +5,25 @@ description = "CRAP scores for Clojure, Java, Go, TypeScript, Rust, and Python, 
 readme = "README.md"
 license = { file = "LICENSE" }
 classifiers = ["License :: OSI Approved :: Zero-Clause BSD (0BSD)"]
-requires-python = ">=3.11"
+requires-python = ">=3.14"
 dependencies = [
-    "tree-sitter>=0.24",
-    "tree-sitter-language-pack>=0.7",
+  "cyclopts>=5.1.1",
+  "pydantic>=2.13.5",
+  "rich>=15.0.0",
+  "tree-sitter>=0.24",
+  "tree-sitter-language-pack>=0.7",
 ]
 
 [project.scripts]
 crapper = "crapper.cli:main"
 
-[project.optional-dependencies]
-dev = ["pytest>=8"]
+[dependency-groups]
+dev = [
+    "coverage>=7.16.2",
+    "pytest>=8",
+    "ruff>=0.14",
+    "ty>=0.0.1a20",
+]
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -26,3 +34,17 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+filterwarnings = [
+  "error",
+  "ignore:Cyclopts application invoked without tokens:UserWarning",
+]
+
+[tool.ruff]
+extend-exclude = ["tests/fixtures"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4", "PTH", "RUF"]
+ignore = ["RUF001", "RUF012", "RUF036"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501", "I001"]

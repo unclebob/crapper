@@ -1,160 +1,161 @@
-from crapper.coverage import (
-    CoverageBundle,
-    go_percent,
-    load_bundle,
-    parse_form_coverage,
-    parse_go_profile,
-    parse_jacoco_index,
-    parse_lcov,
+from pathlib import Path, PurePosixPath
+
+import pytest
+
+from crapper.analyze import _entry
+from crapper.coverage import formats
+from crapper.coverage.formats import Lines, Segment, source_path
+from crapper.coverage.measure import existing, resolve
+from crapper.language import Project
+from crapper.languages import GO
+from crapper.model import Function, Home, Scored, Span
+from crapper.selection import select
+from support import PLANS, POLYGLOT, POLYGLOT_SOURCES, REPORTS
+
+CORE = Path("src/demo/core.clj")
+PAGE = Path("demo/core.clj")
+MODULES = PLANS / "go-modules"
+JACOCO = POLYGLOT / "target/site/jacoco/jacoco.xml"
+READ = {
+    ".info": formats.LCOV.read,
+    ".out": formats.GO_PROFILE.read,
+    ".xml": formats.JACOCO.read,
+}
+LINES = {CORE: (Segment.line(3, 1, 0), Segment.line(4, 0, 1))}
+FORMS = {CORE: (Segment.line(4, 3, 1),)}
+
+
+def owner(file: Path, root: Path) -> Project:
+    return Project(language=GO, home=Home(root=root, directory=root), files=(file,))
+
+
+def measured(reports: tuple[Lines, ...], file: Path, span: Span) -> float:
+    segments = resolve(reports, owner(file, Path())).get(file, ())
+    function = Function(name="measured", namespace="demo", complexity=1, span=span)
+    entry = _entry(function, segments)
+    assert isinstance(entry, Scored)
+    return entry.coverage
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("file:./src//demo/core.clj", "src/demo/core.clj"),
+        ("%2E%2Fsrc%2Fcore.clj", "src/core.clj"),
+    ],
 )
-from crapper.model import Function
+def test_report_paths_drop_url_and_dot_prefixes(raw: str, expected: str) -> None:
+    assert source_path(raw) == Path(expected)
 
 
-def function(**kwargs):
-    defaults = dict(
-        name="choose",
-        namespace="demo.core",
-        complexity=2,
-        start_line=3,
-        end_line=5,
-        path="src/demo/core.clj",
-        language="clojure",
-        jacoco_class=None,
-    )
-    defaults.update(kwargs)
-    return Function(**defaults)
+@pytest.mark.parametrize(
+    ("keys", "file", "root", "found"),
+    [
+        (["src/demo/core.clj"], "demo/core.clj", "", "src/demo/core.clj"),
+        (["src/demo/core.clj"], "/work/src/demo/core.clj", "/work", "src/demo/core.clj"),
+        (["src/demo/core.clj"], "other/core.clj", "", None),
+        ([], "src/demo/core.clj", "", None),
+        (["proj/src/demo/core.clj"], "src/demo/core.clj", "", "proj/src/demo/core.clj"),
+        (["mod.py", "pkg/mod.py"], "/work/mod.py", "/work", "mod.py"),
+        (["mod.py", "pkg/mod.py"], "/work/pkg/mod.py", "/work", "pkg/mod.py"),
+        (["/ci/mod.py", "/ci/pkg/mod.py"], "/work/mod.py", "/work", "/ci/mod.py"),
+    ],
+)  # fmt: skip
+def test_a_file_finds_its_segments_by_the_closest_matching_report_path(
+    keys: list[str], file: str, root: str, found: str | None
+) -> None:
+    report: Lines = {
+        PurePosixPath(key): (Segment.line(line, 1, 0),)
+        for line, key in enumerate(keys, start=1)
+    }
+    expected = {Path(file): report[PurePosixPath(found)]} if found else {}
+    assert resolve([report], owner(Path(file), Path(root))) == expected
 
 
-def test_cloverage_form_counts_and_lcov_lines():
-    html = '<span class="pc" title="1 out of 2 forms covered">   4&nbsp;&nbsp;(if x 1)</span>'
-    assert parse_form_coverage(html) == {4: (1, 2)}
-    lcov = "SF:src/demo/core.clj\nDA:3,1\nDA:4,0\nDA:9,3\nend_of_record\n"
-    parsed = parse_lcov(lcov)
-    bundle = CoverageBundle(lcov=parsed, form_html={"src/demo/core.clj": {4: (1, 2)}})
-    # Form HTML wins over LCOV for Clojure, matching crap4clj.
-    assert bundle.percent_for(function(start_line=3, end_line=5)) == 50.0
+@pytest.mark.parametrize(
+    ("reports", "file", "span", "expected"),
+    [
+        ((), CORE, Span(start=3, end=5), 0.0),
+        ((LINES,), Path("src/missing.clj"), Span(start=3, end=5), 0.0),
+        ((LINES,), CORE, Span(start=3, end=4), 50.0),
+        ((LINES,), CORE, Span(start=5, end=8), 0.0),
+        ((FORMS, LINES), CORE, Span(start=3, end=5), 75.0),
+    ],
+)
+def test_coverage_is_the_covered_share_of_the_first_report_that_has_the_file(
+    reports: tuple[Lines, ...], file: Path, span: Span, expected: float
+) -> None:
+    assert measured(reports, file, span) == expected
 
 
-def test_lcov_percentage_when_there_is_no_html():
-    lcov = parse_lcov("SF:src/demo/core.clj\nDA:3,1\nDA:4,0\nend_of_record\n")
-    bundle = CoverageBundle(lcov=lcov)
-    assert bundle.percent_for(function(start_line=3, end_line=4)) == 50.0
-    assert bundle.percent_for(function(path="src/missing.clj")) is None
+@pytest.mark.parametrize(
+    ("report", "file", "span", "expected"),
+    [
+        (REPORTS / "module.out", "board.go", Span(start=4, end=6), 100.0),
+        (REPORTS / "module.out", "board.go", Span(start=8, end=9), 0.0),
+        (REPORTS / "module.out", "board.go", Span(start=10, end=12), 0.0),
+        (REPORTS / "module.out", "other.go", Span(start=1, end=3), 0.0),
+        (REPORTS / "unrelated.out", "board.go", Span(start=4, end=6), 100.0),
+        (JACOCO, "src/demo/pkg/Board.java", Span(start=4, end=5), 75.0),
+        (JACOCO, "src/demo/pkg/Board.java", Span(start=9, end=9), 100.0),
+        (JACOCO, "demo/Board.java", Span(start=4, end=6), 100.0),
+        (JACOCO, "demo/Missing.java", Span(start=4, end=6), 0.0),
+        (POLYGLOT / "target/coverage/lcov.info", "src/demo/core.clj", Span(start=3, end=4), 50.0),
+        (REPORTS / "branches.info", "src/demo/app.ts", Span(start=2, end=3), 50.0),
+        (REPORTS / "branches.info", "src/demo/app.ts", Span(start=6, end=7), 50.0),
+    ],
+)  # fmt: skip
+def test_a_function_is_measured_from_a_report_on_disk(
+    report: Path, file: str, span: Span, expected: float
+) -> None:
+    assert measured((READ[report.suffix](report),), Path(file), span) == expected
 
 
-def test_lcov_branch_records_override_line_hits():
-    text = "SF:src/demo/app.ts\nDA:2,1\nDA:3,1\nBRDA:3,0,0,1\nBRDA:3,0,1,-\nend_of_record\n"
-    parsed = parse_lcov(text)
-    assert parsed["src/demo/app.ts"][2] == (1, 1)
-    assert parsed["src/demo/app.ts"].branches[3] == (1, 2)
-    bundle = CoverageBundle(lcov=parsed)
-    scored = function(
-        path="src/demo/app.ts",
-        language="typescript",
-        start_line=2,
-        end_line=3,
-        namespace="demo.app",
-    )
-    assert bundle.percent_for(scored) == 50.0
+def test_cloverage_pages_count_forms_per_line() -> None:
+    assert formats.CLOVERAGE.read(POLYGLOT / "target/coverage") == {
+        PAGE: (
+            Segment.line(1, 1, 0),
+            Segment.line(2, 0, 0),
+            Segment.line(3, 2, 0),
+            Segment.line(4, 1, 1),
+        )
+    }
 
 
-def test_a_branchless_span_keeps_line_coverage():
-    text = "SF:src/demo/app.ts\nDA:2,1\nDA:3,0\nBRDA:8,0,0,1\nBRDA:8,0,1,0\nend_of_record\n"
-    bundle = CoverageBundle(lcov=parse_lcov(text))
-    scored = function(path="src/demo/app.ts", language="typescript", start_line=2, end_line=3)
-    assert bundle.percent_for(scored) == 50.0
+@pytest.mark.parametrize(
+    ("report", "problem"),
+    [
+        ("broken.out", "invalid Go coverage block"),
+        ("broken.info", "no LCOV source records"),
+        ("broken.xml", "invalid JaCoCo XML"),
+    ],
+)
+def test_a_broken_report_is_an_error(report: str, problem: str) -> None:
+    with pytest.raises(ValueError, match=problem):
+        READ[Path(report).suffix](REPORTS / report)
 
 
-def test_go_profile_matches_crap4go_statement_ranges():
-    profile = parse_go_profile(
-        "mode: set\ngithub.com/acme/demo/board.go:4.1,6.2 2 1\ngithub.com/acme/demo/board.go:8.1,9.2 1 0\n"
-    )
-    assert go_percent(profile, "board.go", 4, 6) == 100.0
-    assert go_percent(profile, "board.go", 8, 9) == 0.0
-    assert go_percent(profile, "other.go", 1, 3) is None
+def test_a_report_path_naming_another_file_is_not_borrowed() -> None:
+    (project,) = GO.projects(MODULES, [MODULES / "main.go"])
+    report: Lines = {
+        PurePosixPath("example.com/demo/sub/main.go"): (Segment.line(1, 1, 0),)
+    }
+    assert resolve([report], project) == {}
 
 
-def test_jacoco_instruction_coverage_joins_on_class_and_method():
-    xml = """<?xml version="1.0"?>
-    <report>
-      <package>
-        <class name="demo/pkg/Board">
-          <method name="place" line="4">
-            <counter type="INSTRUCTION" missed="1" covered="3"/>
-          </method>
-        </class>
-        <class name="demo/pkg/Board$Inner">
-          <method name="tick" line="9">
-            <counter type="INSTRUCTION" missed="0" covered="2"/>
-          </method>
-        </class>
-      </package>
-    </report>
-    """
-    bundle = CoverageBundle(jacoco=parse_jacoco_index(xml))
-    outer = function(
-        name="place",
-        namespace="demo.pkg.Board",
-        language="java",
-        jacoco_class="demo.pkg.Board",
-        start_line=4,
-        path="src/demo/pkg/Board.java",
-    )
-    inner = function(
-        name="tick",
-        namespace="demo.pkg.Board.Inner",
-        language="java",
-        jacoco_class="demo.pkg.Board$Inner",
-        start_line=9,
-        path="src/demo/pkg/Board.java",
-    )
-    assert bundle.percent_for(outer) == 75.0
-    assert bundle.percent_for(inner) == 100.0
+def test_go_profiles_are_keyed_by_the_files_their_modules_own() -> None:
+    files = [MODULES / "main.go", MODULES / "sub/main.go", MODULES / "tools/main.go"]
+    report = existing(MODULES, GO.projects(MODULES, files))
+    assert sorted(report) == files
+    assert [segment.covered for file in files for segment in report[file]] == [1, 0, 0]
 
 
-def test_jacoco_skips_methods_without_an_instruction_counter():
-    xml = """<report>
-      <class name="demo/pkg/Board">
-        <method name="skip" line="2">
-          <counter type="LINE" missed="1" covered="0"/>
-        </method>
-        <method name="bad" line="nope">
-          <counter type="INSTRUCTION" missed="1" covered="1"/>
-        </method>
-        <counter type="INSTRUCTION" missed="0" covered="1"/>
-      </class>
-    </report>"""
-    found = parse_jacoco_index(xml)
-    assert list(found) == ["demo.pkg.Board#bad"]
-    assert found["demo.pkg.Board#bad"][0].line == 0
+def test_load_reads_every_report_each_language_knows() -> None:
+    assert sorted(
+        file.relative_to(POLYGLOT).as_posix()
+        for file in existing(POLYGLOT, select(POLYGLOT, (), (), changed=False))
+    ) == [source for source in POLYGLOT_SOURCES if source != "src/lib.rs"]
 
 
-def test_missing_go_profile_is_na():
-    assert go_percent(None, "board.go", 1, 3) is None
-
-
-def test_load_bundle_merges_each_report(tmp_path):
-    lcov = tmp_path / "target" / "coverage" / "lcov.info"
-    lcov.parent.mkdir(parents=True)
-    lcov.write_text("SF:src/demo/core.clj\nDA:3,1\nDA:4,0\nend_of_record\n", encoding="utf-8")
-    go = tmp_path / "target" / "coverage" / "go" / "coverage.out"
-    go.parent.mkdir(parents=True)
-    go.write_text("mode: set\nboard.go:1.1,2.2 1 1\n", encoding="utf-8")
-    jacoco = tmp_path / "target" / "site" / "jacoco" / "jacoco.xml"
-    jacoco.parent.mkdir(parents=True)
-    jacoco.write_text(
-        '<report><class name="demo/Board"><method name="place" line="4">'
-        '<counter type="INSTRUCTION" missed="0" covered="1"/></method></class></report>',
-        encoding="utf-8",
-    )
-    html = tmp_path / "target" / "coverage" / "src" / "demo" / "core.clj.html"
-    html.parent.mkdir(parents=True)
-    html.write_text(
-        '<span title="1 out of 2 forms covered">   4&nbsp;&nbsp;(if x 1)</span>',
-        encoding="utf-8",
-    )
-    (tmp_path / "target" / "coverage" / "index.html").write_text("<html></html>", encoding="utf-8")
-    bundle = load_bundle(tmp_path)
-    assert bundle.percent_for(function(start_line=3, end_line=4)) == 50.0
-    assert bundle.go_profile is not None
-    assert bundle.jacoco is not None
+def test_load_on_a_tree_without_reports_measures_nothing(tmp_path: Path) -> None:
+    assert not existing(tmp_path, [])

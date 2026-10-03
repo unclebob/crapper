@@ -1,12 +1,39 @@
-"""Keep a mutant from launching coverage against the project under test.
-
-`run()` falls through into `run_coverage` when a mutant skips the help return.
-That would delete `target/coverage` and recurse into this suite.
-"""
+import runpy
+import shutil
+import sys
+from pathlib import Path
 
 import pytest
 
+from support import FIXTURES, Crapper, Outcome, Project
 
-@pytest.fixture(autouse=True)
-def do_not_launch_project_coverage(monkeypatch):
-    monkeypatch.setattr("crapper.cli.run_coverage", lambda *_args, **_kwargs: None)
+collect_ignore = ["fixtures"]
+
+
+@pytest.fixture
+def project(tmp_path: Path) -> Project:
+    return lambda name: shutil.copytree(FIXTURES / name, tmp_path / name)
+
+
+@pytest.fixture
+def scratch(tmp_path: Path) -> Path:
+    return tmp_path / "scratch"
+
+
+@pytest.fixture
+def crapper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> Crapper:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("FORCE_COLOR", raising=False)
+
+    def run(*argv: str | Path) -> Outcome:
+        monkeypatch.setattr(sys, "argv", ["crapper", *map(str, argv)])
+        with pytest.raises(SystemExit) as exit:
+            runpy.run_module("crapper", run_name="__main__")
+        code = exit.value.code
+        assert isinstance(code, int)
+        captured = capfd.readouterr()
+        return Outcome(code=code, out=captured.out, err=captured.err)
+
+    return run

@@ -1,127 +1,89 @@
-"""Java methods and cyclomatic complexity, following crap4java.
+from pathlib import Path
+from typing import Final
 
-Constructors, abstract methods, and methods inside anonymous or local classes
-are ignored. Nested member types become their own namespace (`pkg.Outer.Inner`)
-so uml-viewer can attach scores to that class. JaCoCo's binary name
-(`pkg.Outer$Inner`) is kept for coverage lookup.
+from tree_sitter import Node
+
+from crapper.coverage.formats import JACOCO, Lines, Report
+from crapper.coverage.tool import run
+from crapper.language import Language, Project
+from crapper.languages.treesitter import Grammar, ancestors, enclosing, text
+from crapper.model import Source
+
+_NAME: Final = "java"
+_JACOCO_PLUGIN = "org.jacoco:jacoco-maven-plugin:0.8.12"
+_REPORT = Report(format=JACOCO, path=Path("target", "site", "jacoco", "jacoco.xml"))
+_TYPES = frozenset(
+    {
+        "class_declaration",
+        "interface_declaration",
+        "enum_declaration",
+        "record_declaration",
+        "annotation_type_declaration",
+    }
+)
+_EXECUTABLES = {"method_declaration", "constructor_declaration", "lambda_expression"}
+_QUERY = """
+(method_declaration name: (_) @name body: (_)) @definition
+[
+  (class_declaration)
+  (interface_declaration)
+  (enum_declaration)
+  (record_declaration)
+  (annotation_type_declaration)
+  (class_body)
+] @opaque
+[
+  (if_statement)
+  (for_statement)
+  (enhanced_for_statement)
+  (while_statement)
+  (do_statement)
+  (catch_clause)
+  (ternary_expression)
+  (switch_label)
+  (binary_expression operator: ["&&" "||"])
+] @decision
 """
 
-import re
 
-from crapper.languages.treesitter import (
-    binary_logic,
-    child_of_type,
-    complexity,
-    end_line,
-    node_text,
-    parse,
-    start_line,
+def _module(_: Source, tree: Node) -> list[str]:
+    return [
+        text(declaration.named_children[-1])
+        for declaration in tree.children
+        if declaration.type == "package_declaration"
+    ]
+
+
+def _scope(method: Node) -> list[str] | None:
+    nested = any(ancestor.type in _EXECUTABLES for ancestor in ancestors(method))
+    return None if nested else enclosing(method, _TYPES)
+
+
+_GRAMMAR = Grammar(name=_NAME, query=_QUERY, module=_module, scope=_scope)
+
+
+def measure(project: Project, scratch: Path) -> list[Lines]:
+    module = project.home.directory
+    data = scratch / "jacoco.exec"
+    (module / _REPORT.path).unlink(missing_ok=True)
+    maven = [
+        "mvn",
+        "-q",
+        f"-Djacoco.destFile={data}",
+        f"-Djacoco.dataFile={data}",
+        f"{_JACOCO_PLUGIN}:prepare-agent",
+        "test",
+        f"{_JACOCO_PLUGIN}:report",
+    ]
+    run(maven, module)
+    return [_REPORT.read(module)]
+
+
+JAVA = Language(
+    name=_NAME,
+    extensions=(".java",),
+    manifests=("pom.xml",),
+    functions=_GRAMMAR.functions,
+    measure=measure,
+    reports=(_REPORT,),
 )
-from crapper.languages.language import Language, LanguageFactory
-from crapper.model import Function
-
-_PACKAGE = re.compile(r"(?m)^\s*package\s+([a-zA-Z_][\w.]*)\s*;")
-_NESTED_TYPES = {
-    "class_declaration",
-    "interface_declaration",
-    "enum_declaration",
-    "record_declaration",
-    "annotation_type_declaration",
-}
-_DECISIONS = {
-    "if_statement",
-    "for_statement",
-    "enhanced_for_statement",
-    "while_statement",
-    "do_statement",
-    "catch_clause",
-    "ternary_expression",
-    "switch_label",
-}
-
-
-def _is_decision(node) -> bool:
-    return node.type in _DECISIONS or binary_logic(node)
-
-
-def _skip(node) -> bool:
-    return node.type in _NESTED_TYPES or node.type == "class_body"
-
-
-def _inside_executable(node) -> bool:
-    current = node.parent
-    while current is not None:
-        if current.type in {
-            "method_declaration",
-            "constructor_declaration",
-            "lambda_expression",
-        }:
-            return True
-        current = current.parent
-    return False
-
-
-def _package_name(source: str) -> str | None:
-    match = _PACKAGE.search(source)
-    return match.group(1) if match else None
-
-
-def _type_chain(data: bytes, node) -> list[str]:
-    names: list[str] = []
-    current = node.parent
-    while current is not None:
-        if current.type in _NESTED_TYPES:
-            ident = child_of_type(current, "identifier")
-            if ident is not None:
-                names.append(node_text(data, ident))
-        current = current.parent
-    names.reverse()
-    return names
-
-
-def _qualify(package: str | None, names: list[str], nested: str) -> str:
-    body = nested.join(names)
-    if package:
-        return f"{package}.{body}" if body else package
-    return body
-
-
-def functions_in_source(source: str, path: str) -> list[Function]:
-    data, tree = parse(source, "java")
-    package = _package_name(source)
-    found: list[Function] = []
-
-    def visit(node) -> None:
-        if node.type == "method_declaration" and not _inside_executable(node):
-            if child_of_type(node, "block") is not None:
-                ident = child_of_type(node, "identifier")
-                names = _type_chain(data, node)
-                if ident is not None and names:
-                    found.append(
-                        Function(
-                            name=node_text(data, ident),
-                            namespace=_qualify(package, names, "."),
-                            complexity=complexity(node, _is_decision, _skip),
-                            start_line=start_line(node),
-                            end_line=end_line(node),
-                            path=path,
-                            language="java",
-                            jacoco_class=_qualify(package, names, "$"),
-                        )
-                    )
-            return
-        for child in node.children:
-            visit(child)
-
-    visit(tree.root_node)
-    return found
-
-
-class Java(Language):
-    def functions(self, source: str, path: str, project_root: str) -> list[Function]:
-        return functions_in_source(source, path)
-
-
-class JavaFactory(LanguageFactory):
-    def create(self) -> Language:
-        return Java()

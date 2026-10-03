@@ -1,0 +1,7 @@
+<report name="stale">
+  <package name="demo">
+    <sourcefile name="Board.java">
+      <line nr="5" mi="0" ci="2" mb="0" cb="0"/>
+    </sourcefile>
+  </package>
+</report>

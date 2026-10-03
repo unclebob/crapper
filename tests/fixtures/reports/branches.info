@@ -1,0 +1,10 @@
+SF:src/demo/app.ts
+DA:2,1
+DA:3,1
+BRDA:3,0,0,1
+BRDA:3,0,1,-
+DA:6,1
+DA:7,0
+BRDA:8,0,0,1
+BRDA:8,0,1,2
+end_of_record
