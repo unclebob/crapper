@@ -138,6 +138,25 @@ def test_existing_coverage_feeds_the_snapshot(tmp_path):
     assert ":crap 2.0" in text
 
 
+def test_existing_gradle_jacoco_report_feeds_the_snapshot(tmp_path):
+    _write(tmp_path, "build.gradle", "")
+    _write(
+        tmp_path,
+        "src/main/java/demo/A.java",
+        "package demo;\nclass A { int f(int x){ if(x>0) return 1; if(x<0) return 2; return 0; } }\n",
+    )
+    _write(
+        tmp_path,
+        "build/reports/jacoco/test/jacocoTestReport.xml",
+        '<report><class name="demo/A"><method name="f" line="2">'
+        '<counter type="INSTRUCTION" missed="0" covered="9"/></method></class></report>',
+    )
+    assert run(["--root", str(tmp_path), "--use-existing-coverage"]) == 0
+    text = (tmp_path / ".metrics" / "crap.edn").read_text(encoding="utf-8")
+    assert ":coverage 100.0" in text
+    assert ":crap 3.0" in text
+
+
 def test_threshold_exits_when_the_worst_score_is_too_high(tmp_path):
     _write(tmp_path, "src/demo/core.clj", "(ns demo.core)\n\n(defn choose [x]\n  (if x 1 0))\n")
     lcov = tmp_path / "target" / "coverage" / "lcov.info"

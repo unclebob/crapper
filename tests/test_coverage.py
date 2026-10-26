@@ -158,3 +158,23 @@ def test_load_bundle_merges_each_report(tmp_path):
     assert bundle.percent_for(function(start_line=3, end_line=4)) == 50.0
     assert bundle.go_profile is not None
     assert bundle.jacoco is not None
+
+
+def test_load_bundle_reads_gradle_jacoco_reports_at_each_depth(tmp_path):
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<!DOCTYPE report PUBLIC "-//JACOCO//DTD Report 1.1//EN" "report.dtd">'
+        '<report name="demo"><package name="demo"><class name="demo/{cls}">'
+        '<method name="f" desc="(I)I" line="2">'
+        '<counter type="INSTRUCTION" missed="1" covered="3"/></method>'
+        "</class></package></report>"
+    )
+    report = "build/reports/jacoco/test/jacocoTestReport.xml"
+    for prefix, cls in (("", "Root"), ("app/", "App"), ("libs/core/", "Core")):
+        path = tmp_path / f"{prefix}{report}"
+        path.parent.mkdir(parents=True)
+        path.write_text(xml.format(cls=cls), encoding="utf-8")
+    bundle = load_bundle(tmp_path)
+    for cls in ("Root", "App", "Core"):
+        found = function(language="java", name="f", namespace=f"demo.{cls}", start_line=2)
+        assert bundle.percent_for(found) == 75.0

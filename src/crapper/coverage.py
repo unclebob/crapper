@@ -532,10 +532,18 @@ def _merge_go(root: Path) -> dict[str, list[tuple[int, int, int, int]]]:
     return merged
 
 
+_JACOCO_REPORTS = (
+    "target/site/jacoco/jacoco.xml",
+    "build/reports/jacoco/test/jacocoTestReport.xml",
+)
+
+
 def _merge_jacoco(root: Path) -> dict[str, list[JacocoMethod]]:
-    paths = [root / "target" / "site" / "jacoco" / "jacoco.xml"]
-    paths.extend(root.glob("*/target/site/jacoco/jacoco.xml"))
-    paths.extend(root.glob("*/*/target/site/jacoco/jacoco.xml"))
+    paths: list[Path] = []
+    for report in _JACOCO_REPORTS:
+        paths.append(root / report)
+        paths.extend(root.glob(f"*/{report}"))
+        paths.extend(root.glob(f"*/*/{report}"))
     merged: dict[str, list[JacocoMethod]] = {}
     for text in _merge_texts(paths):
         for key, methods in parse_jacoco_index(text).items():

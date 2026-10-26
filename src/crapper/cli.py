@@ -71,7 +71,8 @@ named {_SKIPPED_DIRS} are skipped, as are {_TEST_PATTERNS}.
 
 Coverage, when it is produced:
   Clojure      clj -M:cov --lcov, then Cloverage form counts or LCOV
-  Java         Maven JaCoCo instruction coverage, for each pom.xml module
+  Java         Maven or Gradle JaCoCo instruction coverage, for each pom.xml
+               or build.gradle module
   Go           go test ./... -coverprofile=...
   TypeScript   npm run coverage, Vitest's own LCOV, or c8 around npm test
   Rust         cargo llvm-cov, or cargo tarpaulin, in the nearest Cargo.toml
