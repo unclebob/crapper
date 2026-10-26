@@ -44,7 +44,7 @@ and prints a report sorted worst first.
 
 Languages: Clojure (.clj .cljc .cljs .bb), Java (.java), Go (.go),
 TypeScript and JavaScript (.ts .tsx .mts .cts .js .jsx .mjs .cjs),
-Rust (.rs), Python (.py).
+Rust (.rs), Python (.py), C# (.cs).
 
 Options:
   -h, --help                    Print this help and exit.
@@ -76,6 +76,7 @@ Coverage, when it is produced:
   TypeScript   npm run coverage, Vitest's own LCOV, or c8 around npm test
   Rust         cargo llvm-cov, or cargo tarpaulin, in the nearest Cargo.toml
   Python       coverage.py LCOV, via pytest or unittest, per project
+  C#           dotnet test with XPlat Code Coverage, or existing Cobertura XML
 
 uml-viewer joins .metrics/crap.edn on :namespace and :name.
   Clojure      the ns, and the defn name
@@ -84,6 +85,7 @@ uml-viewer joins .metrics/crap.edn on :namespace and :name.
   TypeScript   dotted module path, or module.Class for methods
   Rust         crate::module, or crate::module::Type for methods
   Python       dotted module path, or module.Class for methods
+  C#           namespace.Type, and the source member name
 """
 
 
@@ -286,7 +288,7 @@ def _coverage_bundle(options: Options, root: Path, files: list[Path]):
     if options.use_existing_coverage:
         return load_bundle(root)
     status = run_coverage(root, files, options.coverage_command)
-    if options.coverage_command and status not in (0, None):
+    if status not in (0, None):
         return CoverageBundle()
     return load_bundle(root)
 

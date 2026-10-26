@@ -566,8 +566,9 @@ def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
     """Generate coverage reports for the languages present in `files`.
 
     Returns the custom command's status. A non-zero status means the caller
-    must not read reports already on disk. Per-language runs return 0; a
-    failed tool is reported and that language scores 0% when it wrote nothing.
+    must not read reports already on disk. C# collection also returns a
+    non-zero status on failure or a missing report, so stale reports cannot
+    certify that run. Other per-language runners retain their existing policy.
     """
 
     root = root.resolve()
@@ -581,16 +582,61 @@ def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
         return code
 
     languages = _languages_in(files)
-    if "clojure" in languages:
-        _cover_clojure(root)
-    if "java" in languages:
-        _cover_java(root, files)
-    if "go" in languages:
-        _cover_go(root, files)
-    if "typescript" in languages:
-        _cover_typescript(root, files)
-    if "python" in languages:
-        _cover_python(root, files)
-    if "rust" in languages:
-        _cover_rust(root, files)
+    runners = {
+        "clojure": lambda: _cover_clojure(root),
+        "java": lambda: _cover_java(root, files),
+        "go": lambda: _cover_go(root, files),
+        "typescript": lambda: _cover_typescript(root, files),
+        "python": lambda: _cover_python(root, files),
+        "rust": lambda: _cover_rust(root, files),
+        "csharp": lambda: _cover_csharp(root),
+    }
+    for language, runner in runners.items():
+        if language in languages:
+            status = runner()
+            if status not in (0, None):
+                return status
+    return 0
+
+
+def _csharp_target(root: Path) -> Path | None:
+    targets = sorted([*root.glob("*.sln"), *root.glob("*.slnx")])
+    if not targets:
+        targets = sorted(root.glob("*.csproj"))
+    if len(targets) != 1:
+        _warn("C# coverage needs one solution/project at the root; use --coverage-command for a custom layout.")
+        return None
+    return targets[0]
+
+
+def _prepare_csharp_report(root: Path) -> Path | None:
+    report = root / "target" / "coverage" / "csharp"
+    if report.resolve() != report:
+        _warn("C# coverage output must not traverse directory links.")
+        return None
+    # Own only the collector's previous XML files. Preserve unrelated files.
+    for previous in report.glob("**/coverage.cobertura.xml"):
+        if not previous.is_symlink() and previous.resolve().is_relative_to(report.resolve()):
+            previous.unlink()
+    report.mkdir(parents=True, exist_ok=True)
+    return report
+
+
+def _cover_csharp(root: Path) -> int:
+    target = _csharp_target(root)
+    if target is None:
+        return 1
+    if shutil.which("dotnet") is None:
+        _warn("The .NET SDK is missing; C# coverage will score 0%.")
+        return 127
+    report = _prepare_csharp_report(root)
+    if report is None:
+        return 1
+    code = run_shell(["dotnet", "test", str(target), "--collect", "XPlat Code Coverage", "--results-directory", str(report)], root)
+    if code != 0:
+        _warn(f"C# coverage exited {code}; existing reports will not be read.")
+        return code
+    if not any(report.glob("**/coverage.cobertura.xml")):
+        _warn("No C# coverage report was produced. Configure coverlet.collector or use --coverage-command.")
+        return 1
     return 0

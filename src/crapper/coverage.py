@@ -1,4 +1,4 @@
-"""Load Cloverage, LCOV, JaCoCo, and Go coverage profiles.
+"""Load Cloverage, LCOV, JaCoCo, Go, and .NET Cobertura coverage profiles.
 
 Clojure prefers Cloverage's per-line form counts, then LCOV. Java uses JaCoCo
 instruction counters. Go uses statement profiles. LCOV scores a function by
@@ -425,6 +425,7 @@ class CoverageBundle:
     jacoco: dict[str, list[JacocoMethod]] | None = None
     form_html: dict[str, dict[int, tuple[int, int]]] = field(default_factory=dict)
     source_parts: list[tuple[str, ...]] = field(default_factory=list)
+    cobertura: dict[str, FileCoverage] = field(default_factory=dict)
 
     def bind_sources(self, paths: list[str]) -> None:
         """Remember project files so a short path cannot take a longer file's report."""
@@ -460,7 +461,7 @@ class CoverageBundle:
         html = self._html_lines(function.path)
         if html is not None:
             return percent_for_range(html, function.start_line, function.end_line)
-        record = self._lcov_lines(function.path)
+        record = self._source_lines(function)
         if record is None:
             return None
         branched = branch_percent(record, function.start_line, function.end_line)
@@ -473,6 +474,11 @@ class CoverageBundle:
 
     def _lcov_lines(self, path: str) -> dict[int, tuple[int, int]] | None:
         return _lookup(self.lcov, path, self.source_parts)
+
+    def _source_lines(self, function: Function):
+        if function.language == "csharp":
+            return _lookup(self.cobertura, function.path, self.source_parts)
+        return self._lcov_lines(function.path)
 
 
 def _lookup(index: dict[str, dict], source_path: str, source_parts: list[tuple[str, ...]]):
@@ -566,4 +572,18 @@ def load_bundle(root: Path) -> CoverageBundle:
         go_profile=go_profile or None,
         jacoco=jacoco or None,
         form_html=_merge_forms(root),
+        cobertura=_merge_cobertura(root),
     )
+
+
+def _merge_cobertura(root: Path) -> dict[str, FileCoverage]:
+    from crapper.cobertura import merge_record, parse_cobertura
+
+    paths = list(root.glob("target/coverage/csharp/**/*.xml"))
+    paths.extend(root.glob("coverage/**/coverage.cobertura.xml"))
+    paths.extend(root.glob("TestResults/**/coverage.cobertura.xml"))
+    merged: dict[str, FileCoverage] = {}
+    for text in _merge_texts(sorted(paths)):
+        for path, record in parse_cobertura(text).items():
+            merge_record(merged.setdefault(path, FileCoverage()), record)
+    return merged

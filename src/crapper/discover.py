@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 
 EXTENSIONS = {
+    ".cs": "csharp",
     ".clj": "clojure",
     ".cljc": "clojure",
     ".cljs": "clojure",
@@ -23,6 +24,8 @@ EXTENSIONS = {
 }
 
 SKIP_DIRS = {
+    "bin",
+    "obj",
     ".git",
     ".hg",
     ".svn",
