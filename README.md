@@ -1,6 +1,6 @@
 # crapper
 
-CRAP scores for Clojure, Java, Go, TypeScript, Rust, and Python. One run detects the language of each source file, applies that language's complexity and coverage rules, and writes the snapshot [uml-viewer](https://github.com/unclebob/uml-viewer) already reads.
+CRAP scores for Clojure, Java, Go, TypeScript, Rust, Python, and C#. One run detects the language of each source file, applies that language's complexity and coverage rules, and writes the snapshot [uml-viewer](https://github.com/unclebob/uml-viewer) already reads.
 
 The formula is the one from [crap4clj](https://github.com/unclebob/crap4clj), [crap4java](https://github.com/unclebob/crap4java), and [crap4go](https://github.com/unclebob/crap4go):
 
@@ -52,6 +52,7 @@ uml-viewer groups entries by `:namespace` and joins each operation on `:name`. `
 | TypeScript | the dotted module path, or `module.Class` | the function or method name |
 | Rust | `crate::module`, or `crate::module::Type` | the function or method name |
 | Python | the dotted module path, or `module.Class` | the function or method name |
+| C# | `Namespace.Type`, including nested types | the member name; nested functions include their owner |
 
 Rename or move is a new entry. There is no identity matching across runs.
 
@@ -69,6 +70,10 @@ Rust counts `if`, loops, each `match` arm, `?`, and `&&` / `||`. `mod tests` is 
 
 Python counts `if`, `elif`, `for`, `while`, `except`, each `match` case, a comprehension filter, a conditional expression, and each `and` / `or`. Nested functions stay inside the enclosing function. Coverage is LCOV from `coverage.py`, running pytest when the project uses it and `unittest` otherwise. `coverage` and `pytest` are installed into the project's interpreter when they are missing.
 
+C# counts `if`, loops, `catch` and exception filters, `?:`, non-default switch labels/arms, `when` guards, `&&`, `||`, `??`, `??=`, `?.`, and `and`/`or` patterns. Methods, constructors, operators, explicit accessors and expression-bodied properties are entries. Local functions and lambdas own their decisions instead of increasing their enclosing member's complexity. Top-level statements form `Program.<Main>$`. File-scoped/block namespaces, records, nested types and expression bodies are supported. Auto accessors and implicit primary constructors have no executable source body and are omitted. `bin` and `obj` trees are skipped. Analysis uses tree-sitter; no .NET SDK is needed for `--no-coverage` or existing reports. Preprocessor branches are parsed as source rather than evaluated for a particular build configuration.
+
+C# coverage accepts Coverlet and `dotnet-coverage` Cobertura XML. Branch counts take precedence when present; otherwise line hits are used. The loader reads `target/coverage/csharp/**/*.xml`, `coverage/**/coverage.cobertura.xml` and `TestResults/**/coverage.cobertura.xml`. Duplicate class/run line hits are unioned. Aggregate branch counts use the best observed counts rather than inventing complementary outcomes. Source spans are line-based: functions sharing a source line, including inline lambdas, also share that line's coverage evidence. Use fresh reports for the same source/build configuration; `--use-existing-coverage` does not verify their provenance.
+
 ## Coverage commands
 
 By default a run deletes the previous report for each language it is about to measure and regenerates it:
@@ -81,8 +86,18 @@ By default a run deletes the previous report for each language it is about to me
 | TypeScript | `npm run coverage`, or Vitest `--coverage`, or `npx c8 ... npm test` | `coverage/lcov.info` or `target/coverage/typescript/lcov.info` |
 | Rust | `cargo llvm-cov` or `cargo tarpaulin`, per Cargo package | `target/coverage/rust/lcov.info` |
 | Python | `coverage run` with pytest or unittest, then `coverage lcov` | `target/coverage/python/lcov.info` |
+| C# | `dotnet test SOLUTION --collect "XPlat Code Coverage" --results-directory ...` | `target/coverage/csharp/**/coverage.cobertura.xml` |
 
 A missing tool or a failed test run scores that language at 0% and still writes the snapshot. Pass `--coverage-command` to replace those defaults with one command of your own. `--no-coverage` is the run that leaves coverage and CRAP as N/A.
+
+The C# default requires exactly one `.sln`/`.slnx` at the project root (or one root `.csproj` when no solution exists), the .NET SDK, and test projects configured with `coverlet.collector`. It does not install or edit project dependencies. A failed C# test run, missing SDK, ambiguous target or missing report prevents existing coverage from being read for that run; all analyzed functions then score 0% coverage. Existing collector XML in the tool's output directory is cleared before collection; unrelated files are preserved.
+
+For custom layouts or console-based test harnesses, collect Cobertura into the documented location, then use `--use-existing-coverage`. For example, after building the exact binaries:
+
+```powershell
+dotnet-coverage collect 'dotnet path/to/TestHarness.dll' -f cobertura -o target/coverage/csharp/coverage.cobertura.xml
+python -m crapper --use-existing-coverage --source-root src
+```
 
 ## Development
 
