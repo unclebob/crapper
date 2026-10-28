@@ -1,4 +1,4 @@
-"""Shared tree-sitter helpers for Java, Go, TypeScript, Rust, and Python."""
+"""Shared tree-sitter helpers for Java, Kotlin, Go, TypeScript, Rust, and Python."""
 
 from functools import lru_cache
 from pathlib import Path

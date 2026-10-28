@@ -158,3 +158,81 @@ def test_load_bundle_merges_each_report(tmp_path):
     assert bundle.percent_for(function(start_line=3, end_line=4)) == 50.0
     assert bundle.go_profile is not None
     assert bundle.jacoco is not None
+
+
+def test_load_bundle_reads_gradle_jacoco_reports_at_each_depth(tmp_path):
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<!DOCTYPE report PUBLIC "-//JACOCO//DTD Report 1.1//EN" "report.dtd">'
+        '<report name="demo"><package name="demo"><class name="demo/{cls}">'
+        '<method name="f" desc="(I)I" line="2">'
+        '<counter type="INSTRUCTION" missed="1" covered="3"/></method>'
+        "</class></package></report>"
+    )
+    report = "build/reports/jacoco/test/jacocoTestReport.xml"
+    for prefix, cls in (("", "Root"), ("app/", "App"), ("libs/core/", "Core")):
+        path = tmp_path / f"{prefix}{report}"
+        path.parent.mkdir(parents=True)
+        path.write_text(xml.format(cls=cls), encoding="utf-8")
+    bundle = load_bundle(tmp_path)
+    for cls in ("Root", "App", "Core"):
+        found = function(language="java", name="f", namespace=f"demo.{cls}", start_line=2)
+        assert bundle.percent_for(found) == 75.0
+
+
+KOTLIN_JACOCO = """<?xml version="1.0"?>
+<report>
+  <package>
+    <class name="demo/Shape">
+      <method name="area" line="4">
+        <counter type="INSTRUCTION" missed="1" covered="1"/>
+      </method>
+    </class>
+    <class name="demo/Board">
+      <method name="place$app" line="7">
+        <counter type="INSTRUCTION" missed="3" covered="1"/>
+      </method>
+      <method name="placement" line="20">
+        <counter type="INSTRUCTION" missed="0" covered="5"/>
+      </method>
+    </class>
+    <class name="demo/Strings__UtilKt">
+      <method name="pad" line="3">
+        <counter type="INSTRUCTION" missed="0" covered="4"/>
+      </method>
+    </class>
+  </package>
+</report>
+"""
+
+
+def _kotlin(**kwargs):
+    return function(language="kotlin", path="src/demo/Shape.kt", **kwargs)
+
+
+def test_kotlin_joins_jacoco_on_the_binary_class_and_jvm_name():
+    bundle = CoverageBundle(jacoco=parse_jacoco_index(KOTLIN_JACOCO))
+    default = _kotlin(
+        name="area", namespace="demo.Shape", jacoco_class="demo.Shape$DefaultImpls", start_line=4
+    )
+    internal = _kotlin(
+        name="place", namespace="demo.Board", jacoco_class="demo.Board", start_line=7
+    )
+    part = _kotlin(
+        name="pad", namespace="demo.Strings", jacoco_class="demo.Strings__UtilKt", start_line=3
+    )
+    missing = _kotlin(
+        name="plac", namespace="demo.Board", jacoco_class="demo.Board", start_line=7
+    )
+    assert bundle.percent_for(default) == 50.0
+    assert bundle.percent_for(internal) == 25.0
+    assert bundle.percent_for(part) == 100.0
+    assert bundle.percent_for(missing) is None
+
+
+def test_java_does_not_match_kotlin_mangled_names():
+    bundle = CoverageBundle(jacoco=parse_jacoco_index(KOTLIN_JACOCO))
+    java = function(
+        name="place", namespace="demo.Board", language="java", jacoco_class="demo.Board"
+    )
+    assert bundle.percent_for(java) is None

@@ -1,8 +1,8 @@
 """Load Cloverage, LCOV, JaCoCo, and Go coverage profiles.
 
-Clojure prefers Cloverage's per-line form counts, then LCOV. Java uses JaCoCo
-instruction counters. Go uses statement profiles. LCOV scores a function by
-its BRDA branch records when it has any, and by line hits otherwise.
+Clojure prefers Cloverage's per-line form counts, then LCOV. Java and Kotlin
+use JaCoCo instruction counters. Go uses statement profiles. LCOV scores a
+function by its BRDA branch records when it has any, and by line hits otherwise.
 `percent_for` returns None when the file is absent; analysis turns that into 0%.
 """
 
@@ -375,6 +375,43 @@ def _jacoco_from_index(classes, class_names, method_name, line) -> float | None:
     return nearest.percent
 
 
+def _jacoco_names(function: Function) -> list[str]:
+    """Classes to look in, best first.
+
+    An interface default method is in `I$DefaultImpls`, or in `I` itself when
+    compiled with `-Xjvm-default=all`.
+    """
+
+    names = []
+    if function.jacoco_class:
+        names.append(function.jacoco_class)
+        names.append(function.jacoco_class.removesuffix("$DefaultImpls"))
+    names.append(function.namespace)
+    return list(dict.fromkeys(names))
+
+
+def _mangled_name(classes, class_names, method_name) -> str | None:
+    """A Kotlin JVM name: `name$module` for internal, `name-hash` for inline classes."""
+
+    for name in class_names:
+        prefix = f"{name}#{method_name}"
+        for key in classes:
+            if key.startswith(prefix) and key[len(prefix) : len(prefix) + 1] in ("$", "-"):
+                return key.split("#", 1)[1]
+    return None
+
+
+def _jacoco_percent(classes, function: Function) -> float | None:
+    names = _jacoco_names(function)
+    found = _jacoco_from_index(classes, names, function.name, function.start_line)
+    if found is not None or function.language != "kotlin":
+        return found
+    mangled = _mangled_name(classes, names, function.name)
+    if mangled is None:
+        return None
+    return _jacoco_from_index(classes, names, mangled, function.start_line)
+
+
 def _instruction_counter(method):
     for child in list(method):
         if child.tag == "counter" and child.get("type") == "INSTRUCTION":
@@ -440,15 +477,8 @@ class CoverageBundle:
         self.source_parts = found
 
     def percent_for(self, function: Function) -> float | None:
-        if function.language == "java":
-            names = []
-            if function.jacoco_class:
-                names.append(function.jacoco_class)
-            if function.namespace not in names:
-                names.append(function.namespace)
-            return _jacoco_from_index(
-                self.jacoco or {}, names, function.name, function.start_line
-            )
+        if function.language in ("java", "kotlin"):
+            return _jacoco_percent(self.jacoco or {}, function)
         if function.language == "go":
             return go_percent(
                 self.go_profile,
@@ -532,10 +562,18 @@ def _merge_go(root: Path) -> dict[str, list[tuple[int, int, int, int]]]:
     return merged
 
 
+_JACOCO_REPORTS = (
+    "target/site/jacoco/jacoco.xml",
+    "build/reports/jacoco/test/jacocoTestReport.xml",
+)
+
+
 def _merge_jacoco(root: Path) -> dict[str, list[JacocoMethod]]:
-    paths = [root / "target" / "site" / "jacoco" / "jacoco.xml"]
-    paths.extend(root.glob("*/target/site/jacoco/jacoco.xml"))
-    paths.extend(root.glob("*/*/target/site/jacoco/jacoco.xml"))
+    paths: list[Path] = []
+    for report in _JACOCO_REPORTS:
+        paths.append(root / report)
+        paths.extend(root.glob(f"*/{report}"))
+        paths.extend(root.glob(f"*/*/{report}"))
     merged: dict[str, list[JacocoMethod]] = {}
     for text in _merge_texts(paths):
         for key, methods in parse_jacoco_index(text).items():

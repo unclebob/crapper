@@ -6,13 +6,15 @@ from pathlib import Path
 import pytest
 
 from crapper.cli import GitError, _changed_files, _positionals, _take, main, parse_args, run
-from crapper.discover import is_test_file, language_of
+from crapper.discover import is_test_file, iter_source_files, language_of
 
 
 def test_language_detection():
     assert language_of("src/app/core.clj") == "clojure"
     assert language_of("src/app/core.cljc") == "clojure"
     assert language_of("Widget.java") == "java"
+    assert language_of("Widget.kt") == "kotlin"
+    assert language_of("build.gradle.kts") is None
     assert language_of("board.go") == "go"
     assert language_of("ui/view.tsx") == "typescript"
     assert language_of("src/app.js") == "typescript"
@@ -50,6 +52,52 @@ def _git_status(root: Path, status: str):
         return _Completed(0, status)
 
     return fake
+
+
+TEST_SOURCE_SETS = [
+    "src/commonTest/kotlin/demo/A.kt",
+    "src/jvmTest/kotlin/demo/A.kt",
+    "src/jsTest/kotlin/demo/A.kt",
+    "src/wasmJsTest/kotlin/demo/A.kt",
+    "src/jvmAndAndroidTest/kotlin/demo/A.kt",
+    "src/androidUnitTest/kotlin/demo/A.kt",
+    "src/androidInstrumentedTest/kotlin/demo/A.kt",
+    "src/functionalTest/kotlin/demo/A.kt",
+    "src/integrationTest/java/demo/A.java",
+    "src/browserIdentityTest/kotlin/demo/A.kt",
+    "src/migratedOldTests/kotlin/demo/A.kt",
+    "src/testFixtures/kotlin/demo/A.kt",
+    "src/testDebug/java/demo/A.java",
+    "compiler/testData/codegen/box/A.kt",
+    "core/commonTest/src/demo/A.kt",
+    "core/jvmTest/src/demo/A.kt",
+    "integration-test/src/commonTest/kotlin/demo/A.kt",
+]
+
+STILL_SOURCE = [
+    "src/main/kotlin/demo/A.kt",
+    "src/commonMain/kotlin/demo/A.kt",
+    "src/jvmMain/kotlin/okio/testing/A.kt",
+    "okio-testing-support/src/commonMain/kotlin/okio/A.kt",
+    "integration-test/src/commonMain/kotlin/demo/A.kt",
+    "kotlinx-coroutines-test/common/src/A.kt",
+    "src/main/kotlin/demo/latest/A.kt",
+    "src/main/kotlin/demo/Contest.kt",
+]
+
+
+@pytest.mark.parametrize("relative", TEST_SOURCE_SETS)
+def test_gradle_and_multiplatform_test_source_sets_are_tests(tmp_path, relative):
+    _write(tmp_path, relative, "class A\n")
+    assert is_test_file(relative) is True
+    assert iter_source_files([tmp_path]) == []
+
+
+@pytest.mark.parametrize("relative", STILL_SOURCE)
+def test_main_source_sets_and_testing_libraries_are_still_source(tmp_path, relative):
+    _write(tmp_path, relative, "class A\n")
+    assert is_test_file(relative) is False
+    assert iter_source_files([tmp_path]) == [(tmp_path / relative).resolve()]
 
 
 def test_project_snapshot_is_readable_as_crap4clj_edn(tmp_path):
@@ -136,6 +184,25 @@ def test_existing_coverage_feeds_the_snapshot(tmp_path):
     text = (tmp_path / ".metrics" / "crap.edn").read_text(encoding="utf-8")
     assert ":coverage 100.0" in text
     assert ":crap 2.0" in text
+
+
+def test_existing_gradle_jacoco_report_feeds_the_snapshot(tmp_path):
+    _write(tmp_path, "build.gradle", "")
+    _write(
+        tmp_path,
+        "src/main/java/demo/A.java",
+        "package demo;\nclass A { int f(int x){ if(x>0) return 1; if(x<0) return 2; return 0; } }\n",
+    )
+    _write(
+        tmp_path,
+        "build/reports/jacoco/test/jacocoTestReport.xml",
+        '<report><class name="demo/A"><method name="f" line="2">'
+        '<counter type="INSTRUCTION" missed="0" covered="9"/></method></class></report>',
+    )
+    assert run(["--root", str(tmp_path), "--use-existing-coverage"]) == 0
+    text = (tmp_path / ".metrics" / "crap.edn").read_text(encoding="utf-8")
+    assert ":coverage 100.0" in text
+    assert ":crap 3.0" in text
 
 
 def test_threshold_exits_when_the_worst_score_is_too_high(tmp_path):

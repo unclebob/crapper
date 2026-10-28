@@ -19,6 +19,8 @@ from crapper.runners import (
     _restore_manifests,
     _rust_kind,
     _vitest_version,
+    gradle_command,
+    gradle_modules,
     python_coverage_commands,
     python_roots,
     python_sources,
@@ -295,6 +297,187 @@ def test_missing_build_files_skip_that_language(tmp_path, monkeypatch):
     run_coverage(tmp_path, files, None)
 
 
+def test_java_without_a_build_file_names_both_build_tools(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr("crapper.runners.run_shell", lambda command, cwd: 0)
+    run_coverage(tmp_path, [_write(tmp_path, "src/App.java", "class App {}\n")], None)
+    assert "No pom.xml or build.gradle; skipping Java and Kotlin coverage." in capsys.readouterr().err
+
+
+def _java_modules(tmp_path: Path) -> list[Path]:
+    """One module per layout: Groovy Gradle, Kotlin Gradle, Maven, and both."""
+
+    _write(tmp_path, "groovy/build.gradle", "")
+    _write(tmp_path, "kts/build.gradle.kts", "")
+    _write(tmp_path, "maven/pom.xml", "<project></project>\n")
+    _write(tmp_path, "both/pom.xml", "<project></project>\n")
+    _write(tmp_path, "both/build.gradle", "")
+    return [
+        _write(tmp_path, f"{module}/src/demo/A.java", "class A {}\n")
+        for module in ("groovy", "kts", "maven", "both")
+    ]
+
+
+def test_gradle_modules_are_java_files_whose_nearest_build_file_is_gradle(tmp_path):
+    files = _java_modules(tmp_path)
+    files.append(_write(tmp_path, "groovy/web/app.ts", "export const n = 1\n"))
+    files.append(_write(tmp_path, "loose/B.java", "class B {}\n"))
+    assert gradle_modules(tmp_path, files) == [tmp_path / "groovy", tmp_path / "kts"]
+
+
+def test_a_gradle_module_below_a_maven_parent_is_still_gradle(tmp_path):
+    _write(tmp_path, "pom.xml", "<project></project>\n")
+    _write(tmp_path, "app/build.gradle", "")
+    files = [_write(tmp_path, "app/src/A.java", "class A {}\n")]
+    assert gradle_modules(tmp_path, files) == [tmp_path / "app"]
+
+
+def test_java_coverage_runs_maven_or_gradle_and_prefers_maven(tmp_path, monkeypatch):
+    calls: list[tuple[str, Path]] = []
+    monkeypatch.setattr(
+        "crapper.runners.run_shell",
+        lambda command, cwd: calls.append((Path(command[0]).name, cwd)) or 0,
+    )
+    run_coverage(tmp_path, _java_modules(tmp_path), None)
+    assert sorted(calls) == [
+        ("gradle", tmp_path / "groovy"),
+        ("gradle", tmp_path / "kts"),
+        ("mvn", tmp_path / "both"),
+        ("mvn", tmp_path / "maven"),
+    ]
+
+
+def _gradle_runs(tmp_path: Path, monkeypatch, files: list[Path]) -> list[tuple[str, Path]]:
+    calls: list[tuple[str, Path]] = []
+    monkeypatch.setattr(
+        "crapper.runners.run_shell",
+        lambda command, cwd: calls.append((Path(command[0]).name, cwd)) or 0,
+    )
+    run_coverage(tmp_path, files, None)
+    return sorted(calls)
+
+
+def test_a_subproject_inside_a_selected_gradle_build_runs_with_it(tmp_path, monkeypatch):
+    _write(tmp_path, "settings.gradle", "include 'app'\n")
+    _write(tmp_path, "build.gradle", "")
+    _write(tmp_path, "app/build.gradle", "")
+    files = [
+        _write(tmp_path, "src/main/java/demo/Root.java", "class Root {}\n"),
+        _write(tmp_path, "app/src/main/java/demo/App.java", "class App {}\n"),
+    ]
+    assert _gradle_runs(tmp_path, monkeypatch, files) == [("gradle", tmp_path)]
+
+
+def test_sibling_gradle_subprojects_each_run_once(tmp_path, monkeypatch):
+    _write(tmp_path, "settings.gradle", "include 'app', 'lib'\n")
+    _write(tmp_path, "build.gradle", "")
+    _write(tmp_path, "app/build.gradle", "")
+    _write(tmp_path, "lib/build.gradle", "")
+    files = [
+        _write(tmp_path, "app/src/main/java/demo/App.java", "class App {}\n"),
+        _write(tmp_path, "lib/src/main/java/demo/Lib.java", "class Lib {}\n"),
+    ]
+    assert _gradle_runs(tmp_path, monkeypatch, files) == [
+        ("gradle", tmp_path / "app"),
+        ("gradle", tmp_path / "lib"),
+    ]
+
+
+def test_a_nested_gradle_build_with_its_own_settings_still_runs(tmp_path, monkeypatch):
+    _write(tmp_path, "settings.gradle", "")
+    _write(tmp_path, "build.gradle", "")
+    _write(tmp_path, "tools/settings.gradle", "")
+    _write(tmp_path, "tools/plugin/build.gradle", "")
+    files = [
+        _write(tmp_path, "src/main/java/demo/Root.java", "class Root {}\n"),
+        _write(tmp_path, "tools/plugin/src/main/java/demo/Plugin.java", "class Plugin {}\n"),
+    ]
+    assert _gradle_runs(tmp_path, monkeypatch, files) == [
+        ("gradle", tmp_path),
+        ("gradle", tmp_path / "tools" / "plugin"),
+    ]
+
+
+def test_without_a_settings_file_each_gradle_module_is_its_own_build(tmp_path, monkeypatch):
+    _write(tmp_path, "build.gradle", "")
+    _write(tmp_path, "app/build.gradle", "")
+    files = [
+        _write(tmp_path, "src/main/java/demo/Root.java", "class Root {}\n"),
+        _write(tmp_path, "app/src/main/java/demo/App.java", "class App {}\n"),
+    ]
+    assert _gradle_runs(tmp_path, monkeypatch, files) == [
+        ("gradle", tmp_path),
+        ("gradle", tmp_path / "app"),
+    ]
+
+
+def test_kotlin_build_and_settings_files_group_subprojects_the_same_way(tmp_path, monkeypatch):
+    _write(tmp_path, "settings.gradle.kts", 'include("app")\n')
+    _write(tmp_path, "build.gradle.kts", "")
+    _write(tmp_path, "app/build.gradle.kts", "")
+    _write(tmp_path, "nested/settings.gradle.kts", "")
+    _write(tmp_path, "nested/build.gradle.kts", "")
+    files = [
+        _write(tmp_path, "src/main/java/demo/Root.java", "class Root {}\n"),
+        _write(tmp_path, "app/src/main/java/demo/App.java", "class App {}\n"),
+        _write(tmp_path, "nested/src/main/java/demo/Nested.java", "class Nested {}\n"),
+    ]
+    assert gradle_modules(tmp_path, files) == [tmp_path, tmp_path / "nested"]
+
+
+def test_gradle_command_prefers_the_wrapper_and_passes_the_init_script(tmp_path):
+    init = tmp_path / "jacoco.gradle"
+    module = tmp_path / "app"
+    module.mkdir()
+    assert gradle_command(module, tmp_path, init) == [
+        "gradle",
+        "--init-script",
+        str(init),
+        "test",
+        "jacocoTestReport",
+    ]
+    _write(tmp_path, "gradlew", "#!/bin/sh\n")
+    assert gradle_command(module, tmp_path, init)[0] == str(tmp_path / "gradlew")
+    _write(module, "gradlew", "#!/bin/sh\n")
+    command = gradle_command(module, tmp_path, init)
+    assert isinstance(command, list)
+    assert command[0] == str(module / "gradlew")
+
+
+def test_gradle_run_applies_jacoco_through_a_temporary_init_script(tmp_path, monkeypatch):
+    seen: list[str] = []
+    scripts: list[Path] = []
+
+    def shell(command, cwd):
+        script = Path(command[command.index("--init-script") + 1])
+        scripts.append(script)
+        seen.append(script.read_text(encoding="utf-8"))
+        return 0
+
+    monkeypatch.setattr("crapper.runners.run_shell", shell)
+    _write(tmp_path, "build.gradle", "")
+    run_coverage(tmp_path, [_write(tmp_path, "src/A.java", "class A {}\n")], None)
+    assert len(seen) == 1
+    assert "allprojects" in seen[0]
+    assert "apply plugin: 'jacoco'" in seen[0]
+    assert "tasks.withType(JacocoReport)" in seen[0]
+    assert "xml.required = true" in seen[0]
+    assert not scripts[0].exists()
+    assert not (tmp_path / "init.gradle").exists()
+
+
+def test_gradle_cleans_only_its_stale_report_and_warns_on_failure(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr("crapper.runners.run_shell", lambda command, cwd: 1)
+    _write(tmp_path, "build.gradle.kts", "")
+    report = _write(tmp_path, "build/reports/jacoco/test/jacocoTestReport.xml", "<report/>")
+    html = _write(tmp_path, "build/reports/jacoco/test/html/index.html", "<html/>")
+    classes = _write(tmp_path, "build/classes/java/main/A.class", "x")
+    exec_file = _write(tmp_path, "build/jacoco/test.exec", "x")
+    run_coverage(tmp_path, [_write(tmp_path, "src/A.java", "class A {}\n")], None)
+    assert not report.exists()
+    assert html.exists() and classes.exists() and exec_file.exists()
+    assert f"JaCoCo coverage exited 1 in {tmp_path}. Java and Kotlin coverage will score 0%." in capsys.readouterr().err
+
+
 def test_run_shell_returns_the_child_status_and_reports_a_failed_start(tmp_path, monkeypatch, capsys):
     assert run_shell("exit 3", tmp_path) == 3
 
@@ -547,3 +730,25 @@ def test_vitest_install_restores_manifests_when_install_changes_them(tmp_path, m
 def test_python_sources_name_a_top_level_module_without_its_suffix(tmp_path):
     module = tmp_path / "carddav.py"
     assert python_sources(tmp_path, [module, tmp_path / "test_carddav.py"]) == "carddav"
+
+
+def test_kotlin_files_run_the_gradle_build_once_with_java(tmp_path, monkeypatch):
+    _write(tmp_path, "build.gradle.kts", "")
+    files = [
+        _write(tmp_path, "src/main/kotlin/demo/App.kt", "class App\n"),
+        _write(tmp_path, "src/main/java/demo/Util.java", "class Util {}\n"),
+    ]
+    assert _gradle_runs(tmp_path, monkeypatch, files) == [("gradle", tmp_path)]
+
+
+def test_kotlin_files_alone_run_maven_or_gradle(tmp_path, monkeypatch):
+    _write(tmp_path, "app/build.gradle.kts", "")
+    _write(tmp_path, "lib/pom.xml", "<project></project>\n")
+    files = [
+        _write(tmp_path, "app/src/main/kotlin/App.kt", "class App\n"),
+        _write(tmp_path, "lib/src/main/kotlin/Lib.kt", "class Lib\n"),
+    ]
+    assert _gradle_runs(tmp_path, monkeypatch, files) == [
+        ("gradle", tmp_path / "app"),
+        ("mvn", tmp_path / "lib"),
+    ]
