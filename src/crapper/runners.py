@@ -7,13 +7,14 @@ tool, or a failed run, scores its functions at 0%.
 from __future__ import annotations
 
 import json
+import os
 import shlex
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
-from crapper.discover import is_test_file, language_of
+from crapper.discover import SKIP_DIRS, is_test_file, language_of
 
 _MAVEN = [
     "mvn",
@@ -562,6 +563,86 @@ def _cover_rust(root: Path, files: list[Path]) -> None:
             _warn(f"Rust coverage exited {code} in {module}. Rust coverage will score 0%.")
 
 
+# A test project names the test SDK or says so itself; coverlet is the collector
+# that writes LCOV when `dotnet test` is asked for "XPlat Code Coverage".
+_CSHARP_TEST_MARKERS = ("Microsoft.NET.Test.Sdk", "<IsTestProject>true", "Microsoft.Testing.Platform")
+_COVERLET_MARKERS = ("coverlet.collector", "coverlet.msbuild")
+_COVERLET_LCOV = "DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=lcov"
+_DOTNET_OUTPUT_DIRS = {"bin", "obj"}
+
+
+def _mentions(path: Path, markers: tuple[str, ...]) -> bool:
+    text = path.read_text(encoding="utf-8", errors="replace")
+    return any(marker in text for marker in markers)
+
+
+def _csproj_files(root: Path) -> list[Path]:
+    found: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [name for name in dirnames if name not in SKIP_DIRS and name not in _DOTNET_OUTPUT_DIRS]
+        found.extend(Path(dirpath) / name for name in filenames if name.endswith(".csproj"))
+    return sorted(found)
+
+
+def csharp_test_projects(root: Path) -> list[Path]:
+    """Every .csproj under `root` that is a test project. Test directories are not skipped here."""
+
+    return [project for project in _csproj_files(root) if _mentions(project, _CSHARP_TEST_MARKERS)]
+
+
+def csharp_targets(root: Path) -> list[Path]:
+    """What `dotnet test` is given: each solution at the root, else each test project."""
+
+    solutions = sorted(root.glob("*.sln")) + sorted(root.glob("*.slnx"))
+    return solutions or csharp_test_projects(root)
+
+
+def csharp_command(target: Path, report_dir: Path) -> list[str]:
+    """`dotnet test` writing coverlet LCOV under `report_dir`, one folder per test assembly."""
+
+    return [
+        "dotnet",
+        "test",
+        str(target),
+        "--collect:XPlat Code Coverage",
+        "--results-directory",
+        str(report_dir),
+        "--",
+        _COVERLET_LCOV,
+    ]
+
+
+def _rename_coverlet_reports(report_dir: Path) -> int:
+    """coverlet names its LCOV `coverage.info`; the loader reads `lcov.info`."""
+
+    renamed = 0
+    for info in sorted(report_dir.rglob("coverage.info")):
+        info.rename(info.with_name("lcov.info"))
+        renamed += 1
+    return renamed
+
+
+def _cover_csharp(root: Path, files: list[Path]) -> None:
+    del files
+    targets = csharp_targets(root)
+    if not targets:
+        _warn("No .sln at the root and no test project (.csproj with Microsoft.NET.Test.Sdk); skipping C# coverage.")
+        return
+    if not any(_mentions(project, _COVERLET_MARKERS) for project in csharp_test_projects(root)):
+        _warn(
+            "No test project references coverlet.collector, so dotnet test will write no LCOV. "
+            "C# coverage will score 0%."
+        )
+    report = _coverage_report(root, root, "csharp")
+    _prepare_report(report)
+    for target in targets:
+        code = run_shell(csharp_command(target, report.parent), root)
+        if code != 0:
+            _warn(f"dotnet test exited {code} for {target.name}. Coverage was still recorded where tests ran.")
+    if _rename_coverlet_reports(report.parent) == 0:
+        _warn("dotnet test wrote no coverage.info. C# coverage will score 0%.")
+
+
 def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
     """Generate coverage reports for the languages present in `files`.
 
@@ -593,4 +674,6 @@ def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
         _cover_python(root, files)
     if "rust" in languages:
         _cover_rust(root, files)
+    if "csharp" in languages:
+        _cover_csharp(root, files)
     return 0

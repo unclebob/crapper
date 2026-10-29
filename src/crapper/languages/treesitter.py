@@ -1,4 +1,4 @@
-"""Shared tree-sitter helpers for Java, Go, TypeScript, Rust, and Python."""
+"""Shared tree-sitter helpers for Java, Go, TypeScript, Rust, Python, and C#."""
 
 from functools import lru_cache
 from pathlib import Path
@@ -80,3 +80,21 @@ def binary_logic(node) -> bool:
     return node.type == "binary_expression" and any(
         child.type in {"&&", "||"} for child in node.children
     )
+
+
+def claim_name(used: set[str], name: str) -> str:
+    """`name`, or `name#2`, `name#3`, ... when an earlier entry already has it.
+
+    Route callbacks are named after their route, and one route may register
+    several handlers.
+    """
+
+    if name not in used:
+        used.add(name)
+        return name
+    number = 2
+    while f"{name}#{number}" in used:
+        number += 1
+    chosen = f"{name}#{number}"
+    used.add(chosen)
+    return chosen
