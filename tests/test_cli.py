@@ -21,6 +21,7 @@ def test_language_detection():
     assert language_of("src/app.jsx") == "typescript"
     assert language_of("src/lib.rs") == "rust"
     assert language_of("src/crapper/cli.py") == "python"
+    assert language_of("app/Foo/Bar.php") == "php"
     assert language_of("types.d.ts") is None
     assert language_of("notes.md") is None
     assert language_of("app.cts") == "typescript"
@@ -28,6 +29,8 @@ def test_language_detection():
     assert is_test_file("app.test.cts") is True
     assert is_test_file("app.spec.cts") is True
     assert is_test_file("app.cts") is False
+    assert is_test_file("app/Foo/BarTest.php") is True
+    assert is_test_file("app/Foo/Bar.php") is False
 
 
 def _write(root: Path, relative: str, source: str) -> None:
@@ -136,6 +139,33 @@ def test_existing_coverage_feeds_the_snapshot(tmp_path):
     text = (tmp_path / ".metrics" / "crap.edn").read_text(encoding="utf-8")
     assert ":coverage 100.0" in text
     assert ":crap 2.0" in text
+
+
+def test_existing_clover_report_feeds_php_functions(tmp_path):
+    _write(
+        tmp_path,
+        "app/Foo/Bar.php",
+        "<?php\nnamespace App\\Foo;\n\nclass Bar\n{\n"
+        "    public function place($x)\n    {\n        if ($x) {\n"
+        "            return 1;\n        }\n        return 0;\n    }\n}\n",
+    )
+    source = (tmp_path / "app" / "Foo" / "Bar.php").resolve()
+    _write(
+        tmp_path,
+        "target/coverage/php/clover.xml",
+        f'<coverage><project><file name="{source}">'
+        '<line num="6" type="method" name="place" count="1"/>'
+        '<line num="8" type="stmt" count="1"/>'
+        '<line num="9" type="stmt" count="0"/>'
+        '<line num="11" type="stmt" count="1"/>'
+        "</file></project></coverage>",
+    )
+    assert run(["--root", str(tmp_path), "--use-existing-coverage"]) == 0
+    text = (tmp_path / ".metrics" / "crap.edn").read_text(encoding="utf-8")
+    assert ':name "place"' in text
+    assert ':namespace "App\\\\Foo\\\\Bar"' in text
+    assert ":complexity 2" in text
+    assert ":coverage 66.6667" in text
 
 
 def test_threshold_exits_when_the_worst_score_is_too_high(tmp_path):

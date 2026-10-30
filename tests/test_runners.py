@@ -19,6 +19,8 @@ from crapper.runners import (
     _restore_manifests,
     _rust_kind,
     _vitest_version,
+    php_command,
+    php_packages,
     python_coverage_commands,
     python_roots,
     python_sources,
@@ -547,3 +549,58 @@ def test_vitest_install_restores_manifests_when_install_changes_them(tmp_path, m
 def test_python_sources_name_a_top_level_module_without_its_suffix(tmp_path):
     module = tmp_path / "carddav.py"
     assert python_sources(tmp_path, [module, tmp_path / "test_carddav.py"]) == "carddav"
+
+
+def test_php_package_runs_pest_before_phpunit_with_a_clover_report(tmp_path):
+    _write(tmp_path, "composer.json", "{}\n")
+    _write(tmp_path, "vendor/bin/phpunit", "")
+    source = _write(tmp_path, "app/Foo/Bar.php", "<?php\n")
+    report = tmp_path / "target" / "coverage" / "php" / "clover.xml"
+    assert php_packages(tmp_path, [source]) == [tmp_path.resolve()]
+    assert php_command(tmp_path, report) == [
+        "env",
+        "XDEBUG_MODE=coverage",
+        str(tmp_path / "vendor" / "bin" / "phpunit"),
+        "--coverage-clover",
+        str(report),
+    ]
+    _write(tmp_path, "vendor/bin/pest", "")
+    assert php_command(tmp_path, report)[2] == str(tmp_path / "vendor" / "bin" / "pest")
+    assert php_command(tmp_path / "missing", report) is None
+
+
+def test_php_coverage_runs_in_each_composer_package(tmp_path, monkeypatch, capsys):
+    calls = []
+
+    def shell(command, cwd):
+        calls.append((command, cwd))
+        if cwd.name == "api":
+            Path(command[-1]).write_text("<coverage/>", encoding="utf-8")
+        return 0
+
+    monkeypatch.setattr("crapper.runners.run_shell", shell)
+    for name in ("api", "worker"):
+        _write(tmp_path, f"{name}/composer.json", "{}\n")
+        _write(tmp_path, f"{name}/vendor/bin/phpunit", "")
+    stale = _write(tmp_path, "target/coverage/php/worker/clover.xml", "old")
+    files = [
+        _write(tmp_path, "api/src/Board.php", "<?php\n"),
+        _write(tmp_path, "worker/src/Job.php", "<?php\n"),
+    ]
+    run_coverage(tmp_path, files, None)
+    assert [cwd.name for _command, cwd in calls] == ["api", "worker"]
+    assert (tmp_path / "target/coverage/php/api/clover.xml").is_file()
+    assert not stale.exists()
+    err = capsys.readouterr().err
+    assert "No Clover report in" in err and "worker" in err
+    assert "pcov or Xdebug" in err
+
+
+def test_php_without_composer_or_a_test_runner_is_skipped(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr("crapper.runners.run_shell", lambda command, cwd: 0)
+    loose = _write(tmp_path, "loose/Board.php", "<?php\n")
+    run_coverage(tmp_path, [loose], None)
+    assert "No composer.json; skipping PHP coverage." in capsys.readouterr().err
+    _write(tmp_path, "composer.json", "{}\n")
+    run_coverage(tmp_path, [loose], None)
+    assert "No vendor/bin/pest or vendor/bin/phpunit" in capsys.readouterr().err

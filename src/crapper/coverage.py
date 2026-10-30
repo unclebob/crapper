@@ -1,8 +1,9 @@
-"""Load Cloverage, LCOV, JaCoCo, and Go coverage profiles.
+"""Load Cloverage, LCOV, JaCoCo, Clover, and Go coverage profiles.
 
 Clojure prefers Cloverage's per-line form counts, then LCOV. Java uses JaCoCo
-instruction counters. Go uses statement profiles. LCOV scores a function by
-its BRDA branch records when it has any, and by line hits otherwise.
+instruction counters. Go uses statement profiles. PHP uses the statement lines
+of PHPUnit's Clover report. LCOV scores a function by its BRDA branch records
+when it has any, and by line hits otherwise.
 `percent_for` returns None when the file is absent; analysis turns that into 0%.
 """
 
@@ -418,11 +419,58 @@ def parse_jacoco_index(text: str) -> dict[str, list[JacocoMethod]]:
     return found
 
 
+class CloverFile(dict):
+    """Statement lines of one Clover `<file>`, as `line → (covered, 1)`.
+
+    `methods` holds the `type="method"` lines the same way. Clover writes a
+    method line in place of the statement on that line, so a method written
+    on one line has only its method line.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.methods: dict[int, tuple[int, int]] = {}
+
+
+def _clover_line(record: CloverFile, line) -> None:
+    try:
+        number = int(line.get("num") or "0")
+        count = int(line.get("count") or "0")
+    except ValueError:
+        return
+    hits = (1 if count > 0 else 0, 1)
+    if line.get("type") == "stmt":
+        record[number] = hits
+    elif line.get("type") == "method":
+        record.methods[number] = hits
+
+
+def parse_clover(text: str) -> dict[str, CloverFile]:
+    found: dict[str, CloverFile] = {}
+    for file_node in ET.fromstring(text).iter("file"):
+        record = CloverFile()
+        for line in file_node.iter("line"):
+            _clover_line(record, line)
+        found[file_node.get("name", "")] = record
+    return found
+
+
+def clover_percent(record: CloverFile | None, start: int, end: int) -> float | None:
+    """Statement coverage, or the method line when the span has no statement."""
+
+    if record is None:
+        return None
+    if any(start <= line <= end for line in record):
+        return percent_for_range(record, start, end)
+    return percent_for_range(record.methods, start, end)
+
+
 @dataclass
 class CoverageBundle:
     lcov: dict[str, dict[int, tuple[int, int]]] = field(default_factory=dict)
     go_profile: dict[str, list[tuple[int, int, int, int]]] | None = None
     jacoco: dict[str, list[JacocoMethod]] | None = None
+    clover: dict[str, CloverFile] = field(default_factory=dict)
     form_html: dict[str, dict[int, tuple[int, int]]] = field(default_factory=dict)
     source_parts: list[tuple[str, ...]] = field(default_factory=list)
 
@@ -457,6 +505,9 @@ class CoverageBundle:
                 function.end_line,
                 self.source_parts,
             )
+        if function.language == "php":
+            record = _lookup(self.clover, function.path, self.source_parts)
+            return clover_percent(record, function.start_line, function.end_line)
         html = self._html_lines(function.path)
         if html is not None:
             return percent_for_range(html, function.start_line, function.end_line)
@@ -543,6 +594,15 @@ def _merge_jacoco(root: Path) -> dict[str, list[JacocoMethod]]:
     return merged
 
 
+def _merge_clover(root: Path) -> dict[str, CloverFile]:
+    paths = list(root.glob("target/coverage/**/clover.xml"))
+    paths.extend(root.glob("coverage/**/clover.xml"))
+    merged: dict[str, CloverFile] = {}
+    for text in _merge_texts(paths):
+        merged.update(parse_clover(text))
+    return merged
+
+
 def _merge_forms(root: Path) -> dict[str, dict[int, tuple[int, int]]]:
     coverage_dir = root / "target" / "coverage"
     found: dict[str, dict[int, tuple[int, int]]] = {}
@@ -565,5 +625,6 @@ def load_bundle(root: Path) -> CoverageBundle:
         lcov=_merge_lcov(root),
         go_profile=go_profile or None,
         jacoco=jacoco or None,
+        clover=_merge_clover(root),
         form_html=_merge_forms(root),
     )

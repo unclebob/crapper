@@ -70,7 +70,7 @@ def _clean_dir(path: Path) -> None:
         shutil.rmtree(path)
 
 
-_COVERAGE_DIRS = {"typescript", "rust", "go", "python"}
+_COVERAGE_DIRS = {"typescript", "rust", "go", "python", "php"}
 
 
 def _outside_language_dirs(coverage: Path, path: Path) -> bool:
@@ -562,6 +562,51 @@ def _cover_rust(root: Path, files: list[Path]) -> None:
             _warn(f"Rust coverage exited {code} in {module}. Rust coverage will score 0%.")
 
 
+def php_packages(root: Path, files: list[Path]) -> list[Path]:
+    root = root.resolve()
+    return [
+        package.resolve()
+        for package in _modules_with(files, ".php", "composer.json", root)
+    ]
+
+
+def php_command(package: Path, report: Path) -> list[str] | None:
+    for name in ("pest", "phpunit"):
+        binary = package / "vendor" / "bin" / name
+        if binary.is_file():
+            return [
+                "env",
+                # Xdebug 3 records no coverage without it. pcov ignores it.
+                "XDEBUG_MODE=coverage",
+                str(binary),
+                "--coverage-clover",
+                str(report),
+            ]
+    return None
+
+
+def _cover_php(root: Path, files: list[Path]) -> None:
+    packages = php_packages(root, files)
+    if not packages:
+        _warn("No composer.json; skipping PHP coverage.")
+        return
+    for package in packages:
+        report = _coverage_report(root, package, "php").with_name("clover.xml")
+        command = php_command(package, report)
+        if command is None:
+            _warn(f"No vendor/bin/pest or vendor/bin/phpunit in {package}; skipping PHP coverage.")
+            continue
+        _prepare_report(report)
+        code = run_shell(command, package)
+        if not report.is_file():
+            _warn(
+                f"No Clover report in {package} (exit {code}). "
+                "PHP coverage needs pcov or Xdebug; PHP coverage will score 0%."
+            )
+        elif code != 0:
+            _warn(f"PHP tests exited {code} in {package}. Coverage was still recorded.")
+
+
 def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
     """Generate coverage reports for the languages present in `files`.
 
@@ -593,4 +638,6 @@ def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
         _cover_python(root, files)
     if "rust" in languages:
         _cover_rust(root, files)
+    if "php" in languages:
+        _cover_php(root, files)
     return 0
