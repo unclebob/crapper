@@ -162,7 +162,7 @@ def test_clover_statement_lines_score_a_php_function():
 
     def method(start, end):
         return function(
-            namespace="App.Foo.Bar",
+            namespace="App\\Foo\\Bar",
             language="php",
             path="/proj/app/Foo/Bar.php",
             start_line=start,

@@ -163,7 +163,7 @@ def test_existing_clover_report_feeds_php_functions(tmp_path):
     assert run(["--root", str(tmp_path), "--use-existing-coverage"]) == 0
     text = (tmp_path / ".metrics" / "crap.edn").read_text(encoding="utf-8")
     assert ':name "place"' in text
-    assert ':namespace "App.Foo.Bar"' in text
+    assert ':namespace "App\\\\Foo\\\\Bar"' in text
     assert ":complexity 2" in text
     assert ":coverage 66.6667" in text
 

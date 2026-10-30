@@ -1,8 +1,8 @@
 """PHP functions, methods, and cyclomatic complexity.
 
-The namespace is the PHP namespace with dots, plus the class for a method
-(`App.Foo.Bar`), because uml-viewer nests namespaces on `.`. A function
-outside any namespace takes the file's dotted path.
+The namespace is the PHP namespace, plus the class for a method
+(`App\\Foo\\Bar`). A function outside any namespace takes the file's dotted
+path.
 """
 
 from crapper.languages.treesitter import (
@@ -77,7 +77,7 @@ def _namespace_name(data: bytes, definition) -> str:
     name = child_of_type(definition, "namespace_name")
     if name is None:
         return ""
-    return node_text(data, name).replace("\\", ".")
+    return node_text(data, name)
 
 
 def _namespace_of(data: bytes, node, statements: list) -> str:
@@ -110,7 +110,7 @@ def _module_path(path: str, source_root: str | None) -> str:
 
 
 def _qualify(namespace: str, name: str | None) -> str:
-    return ".".join(part for part in (namespace, name) if part)
+    return "\\".join(part for part in (namespace, name) if part)
 
 
 def _owner(data: bytes, node, namespace: str, path: str, source_root) -> str | None:

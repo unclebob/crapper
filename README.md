@@ -52,7 +52,7 @@ uml-viewer groups entries by `:namespace` and joins each operation on `:name`. `
 | TypeScript | the dotted module path, or `module.Class` | the function or method name |
 | Rust | `crate::module`, or `crate::module::Type` | the function or method name |
 | Python | the dotted module path, or `module.Class` | the function or method name |
-| PHP | the namespace with dots (`App.Foo`), or `App.Foo.Class`; the dotted file path for a function outside any namespace | the function or method name |
+| PHP | the namespace (`App\Foo`), or `App\Foo\Class`; the dotted file path for a function outside any namespace | the function or method name |
 
 Rename or move is a new entry. There is no identity matching across runs.
 

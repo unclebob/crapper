@@ -46,7 +46,7 @@ final class Bar
 }
 """
     assert _rows(functions_in_source(source, "app/Foo/Bar.php", "/proj")) == [
-        ("App.Foo.Bar", "score", 25),
+        ("App\\Foo\\Bar", "score", 25),
     ]
 
 
@@ -98,10 +98,10 @@ function helper($items)
 }
 """
     assert _rows(functions_in_source(source, "src/Foo/helpers.php", "/proj")) == [
-        ("App.Foo.Base", "__construct", 2),
-        ("App.Foo.Greets", "hi", 2),
-        ("App.Foo.Suit", "color", 3),
-        ("App.Foo", "helper", 3),
+        ("App\\Foo\\Base", "__construct", 2),
+        ("App\\Foo\\Greets", "hi", 2),
+        ("App\\Foo\\Suit", "color", 3),
+        ("App\\Foo", "helper", 3),
     ]
 
 
@@ -133,8 +133,8 @@ namespace App\\Two {
 }
 """
     assert _rows(functions_in_source(source, "src/two.php", "/proj")) == [
-        ("App.One.A", "run", 1),
-        ("App.Two.B", "run", 1),
+        ("App\\One\\A", "run", 1),
+        ("App\\Two\\B", "run", 1),
     ]
 
 
