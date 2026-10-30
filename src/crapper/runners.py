@@ -571,13 +571,12 @@ def php_packages(root: Path, files: list[Path]) -> list[Path]:
 
 
 def php_command(package: Path, report: Path) -> list[str] | None:
-    """XDEBUG_MODE has no effect under pcov. Xdebug 3 records no coverage without it."""
-
     for name in ("pest", "phpunit"):
         binary = package / "vendor" / "bin" / name
         if binary.is_file():
             return [
                 "env",
+                # Xdebug 3 records no coverage without it. pcov ignores it.
                 "XDEBUG_MODE=coverage",
                 str(binary),
                 "--coverage-clover",
