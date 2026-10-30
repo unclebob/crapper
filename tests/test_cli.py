@@ -21,7 +21,7 @@ def test_language_detection():
     assert language_of("src/app.jsx") == "typescript"
     assert language_of("src/lib.rs") == "rust"
     assert language_of("src/crapper/cli.py") == "python"
-    assert language_of("app/Survey/Board.php") == "php"
+    assert language_of("app/Foo/Bar.php") == "php"
     assert language_of("types.d.ts") is None
     assert language_of("notes.md") is None
     assert language_of("app.cts") == "typescript"
@@ -29,8 +29,8 @@ def test_language_detection():
     assert is_test_file("app.test.cts") is True
     assert is_test_file("app.spec.cts") is True
     assert is_test_file("app.cts") is False
-    assert is_test_file("app/Survey/BoardTest.php") is True
-    assert is_test_file("app/Survey/Board.php") is False
+    assert is_test_file("app/Foo/BarTest.php") is True
+    assert is_test_file("app/Foo/Bar.php") is False
 
 
 def _write(root: Path, relative: str, source: str) -> None:
@@ -144,12 +144,12 @@ def test_existing_coverage_feeds_the_snapshot(tmp_path):
 def test_existing_clover_report_feeds_php_functions(tmp_path):
     _write(
         tmp_path,
-        "app/Survey/Board.php",
-        "<?php\nnamespace App\\Survey;\n\nclass Board\n{\n"
+        "app/Foo/Bar.php",
+        "<?php\nnamespace App\\Foo;\n\nclass Bar\n{\n"
         "    public function place($x)\n    {\n        if ($x) {\n"
         "            return 1;\n        }\n        return 0;\n    }\n}\n",
     )
-    source = (tmp_path / "app" / "Survey" / "Board.php").resolve()
+    source = (tmp_path / "app" / "Foo" / "Bar.php").resolve()
     _write(
         tmp_path,
         "target/coverage/php/clover.xml",
@@ -163,7 +163,7 @@ def test_existing_clover_report_feeds_php_functions(tmp_path):
     assert run(["--root", str(tmp_path), "--use-existing-coverage"]) == 0
     text = (tmp_path / ".metrics" / "crap.edn").read_text(encoding="utf-8")
     assert ':name "place"' in text
-    assert ':namespace "App.Survey.Board"' in text
+    assert ':namespace "App.Foo.Bar"' in text
     assert ":complexity 2" in text
     assert ":coverage 66.6667" in text
 

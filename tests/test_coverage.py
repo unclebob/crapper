@@ -133,9 +133,9 @@ def test_jacoco_skips_methods_without_an_instruction_counter():
 CLOVER = """<?xml version="1.0" encoding="UTF-8"?>
 <coverage generated="1">
   <project timestamp="1">
-    <package name="App\\Survey">
-      <file name="/proj/app/Survey/Board.php">
-        <class name="App\\Survey\\Board" namespace="App\\Survey"/>
+    <package name="App\\Foo">
+      <file name="/proj/app/Foo/Bar.php">
+        <class name="App\\Foo\\Bar" namespace="App\\Foo"/>
         <line num="7" type="method" name="place" visibility="public" complexity="2" crap="2" count="3"/>
         <line num="9" type="stmt" count="3"/>
         <line num="10" type="stmt" count="0"/>
@@ -154,7 +154,7 @@ CLOVER = """<?xml version="1.0" encoding="UTF-8"?>
 
 def test_clover_statement_lines_score_a_php_function():
     parsed = parse_clover(CLOVER)
-    board = parsed["/proj/app/Survey/Board.php"]
+    board = parsed["/proj/app/Foo/Bar.php"]
     assert board == {9: (1, 1), 10: (0, 1), 12: (1, 1)}
     assert board.methods == {7: (1, 1), 15: (1, 1), 16: (0, 1)}
     assert parsed["/proj/helpers.php"] == {3: (0, 1)}
@@ -162,9 +162,9 @@ def test_clover_statement_lines_score_a_php_function():
 
     def method(start, end):
         return function(
-            namespace="App.Survey.Board",
+            namespace="App.Foo.Bar",
             language="php",
-            path="/proj/app/Survey/Board.php",
+            path="/proj/app/Foo/Bar.php",
             start_line=start,
             end_line=end,
         )
@@ -180,7 +180,7 @@ def test_load_bundle_reads_clover_under_target_coverage(tmp_path):
     report.parent.mkdir(parents=True)
     report.write_text(CLOVER, encoding="utf-8")
     bundle = load_bundle(tmp_path)
-    assert list(bundle.clover) == ["/proj/app/Survey/Board.php", "/proj/helpers.php"]
+    assert list(bundle.clover) == ["/proj/app/Foo/Bar.php", "/proj/helpers.php"]
 
 
 def test_missing_go_profile_is_na():

@@ -1,7 +1,7 @@
 """PHP functions, methods, and cyclomatic complexity.
 
 The namespace is the PHP namespace with dots, plus the class for a method
-(`App.Survey.Board`), because uml-viewer nests namespaces on `.`. A function
+(`App.Foo.Bar`), because uml-viewer nests namespaces on `.`. A function
 outside any namespace takes the file's dotted path.
 """
 

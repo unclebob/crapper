@@ -554,7 +554,7 @@ def test_python_sources_name_a_top_level_module_without_its_suffix(tmp_path):
 def test_php_package_runs_pest_before_phpunit_with_a_clover_report(tmp_path):
     _write(tmp_path, "composer.json", "{}\n")
     _write(tmp_path, "vendor/bin/phpunit", "")
-    source = _write(tmp_path, "app/Survey/Board.php", "<?php\n")
+    source = _write(tmp_path, "app/Foo/Bar.php", "<?php\n")
     report = tmp_path / "target" / "coverage" / "php" / "clover.xml"
     assert php_packages(tmp_path, [source]) == [tmp_path.resolve()]
     assert php_command(tmp_path, report) == [

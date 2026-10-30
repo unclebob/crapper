@@ -7,9 +7,9 @@ def _rows(functions):
 
 def test_each_decision_counts_once():
     source = """<?php
-namespace App\\Survey;
+namespace App\\Foo;
 
-final class Board
+final class Bar
 {
     public function score($a, $b, array $values)
     {
@@ -45,14 +45,14 @@ final class Board
     }
 }
 """
-    assert _rows(functions_in_source(source, "app/Survey/Board.php", "/proj")) == [
-        ("App.Survey.Board", "score", 25),
+    assert _rows(functions_in_source(source, "app/Foo/Bar.php", "/proj")) == [
+        ("App.Foo.Bar", "score", 25),
     ]
 
 
 def test_methods_functions_and_closures():
     source = """<?php
-namespace App\\Survey;
+namespace App\\Foo;
 
 interface Shape { public function area(): float; }
 
@@ -97,11 +97,11 @@ function helper($items)
     return array_map($map, $items);
 }
 """
-    assert _rows(functions_in_source(source, "src/Survey/helpers.php", "/proj")) == [
-        ("App.Survey.Base", "__construct", 2),
-        ("App.Survey.Greets", "hi", 2),
-        ("App.Survey.Suit", "color", 3),
-        ("App.Survey", "helper", 3),
+    assert _rows(functions_in_source(source, "src/Foo/helpers.php", "/proj")) == [
+        ("App.Foo.Base", "__construct", 2),
+        ("App.Foo.Greets", "hi", 2),
+        ("App.Foo.Suit", "color", 3),
+        ("App.Foo", "helper", 3),
     ]
 
 
