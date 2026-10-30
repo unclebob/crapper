@@ -1,16 +1,8 @@
 """PHP functions, methods, and cyclomatic complexity.
 
-Decision points follow Java and TypeScript: `if`, `elseif`, loops, `catch`,
-`?:` (including the short `?:`), each `switch` case and `default`, each
-`match` arm, `&&` / `||` / `and` / `or`, plus `??` and `?->`. Methods of
-classes, traits, and enums, and top-level functions, are entries. Closures,
-arrow functions, and nested functions count toward the function that holds
-them. Methods of an anonymous class are not entries and do not raise the
-enclosing function's complexity, as in Java.
-
-The namespace is the PHP namespace with `.` in place of `\\`, plus the class
-for a method (`App.Survey.Board`), so uml-viewer nests it like the other
-languages. A function outside any namespace takes the file's dotted path.
+The namespace is the PHP namespace with dots, plus the class for a method
+(`App.Survey.Board`), because uml-viewer nests namespaces on `.`. A function
+outside any namespace takes the file's dotted path.
 """
 
 from crapper.languages.treesitter import (
@@ -89,8 +81,6 @@ def _namespace_name(data: bytes, definition) -> str:
 
 
 def _namespace_of(data: bytes, node, statements: list) -> str:
-    """The bracketed namespace that holds `node`, else the last `namespace X;` above it."""
-
     current = node.parent
     while current is not None:
         if current.type == "namespace_definition":

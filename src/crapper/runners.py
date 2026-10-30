@@ -571,10 +571,7 @@ def php_packages(root: Path, files: list[Path]) -> list[Path]:
 
 
 def php_command(package: Path, report: Path) -> list[str] | None:
-    """Pest or PHPUnit writing Clover to `report`, or None when neither is installed.
-
-    XDEBUG_MODE has no effect under pcov. Xdebug 3 records no coverage without it.
-    """
+    """XDEBUG_MODE has no effect under pcov. Xdebug 3 records no coverage without it."""
 
     for name in ("pest", "phpunit"):
         binary = package / "vendor" / "bin" / name
