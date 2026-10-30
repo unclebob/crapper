@@ -8,6 +8,7 @@ from crapper.runners import (
     PackageJsonError,
     _clean_clojure,
     _clean_dir,
+    _clean_haskell_reports,
     _coverage_report,
     _ensure_python_module,
     _ensure_vitest_coverage,
@@ -20,6 +21,8 @@ from crapper.runners import (
     _rust_kind,
     _vitest_version,
     python_coverage_commands,
+    haskell_coverage_command,
+    haskell_projects,
     python_roots,
     python_sources,
     run_coverage,
@@ -102,6 +105,61 @@ def test_rust_module_is_the_nearest_cargo_package(tmp_path):
     _write(tmp_path, "src-tauri/Cargo.toml", '[package]\nname = "bookwriter"\nversion = "0.1.0"\n')
     lib = _write(tmp_path, "src-tauri/src/lib.rs", "pub fn read_text() {}\n")
     assert rust_modules(tmp_path, [lib]) == [(tmp_path / "src-tauri").resolve()]
+
+
+def test_haskell_uses_the_root_cabal_project_for_all_packages(tmp_path):
+    _write(tmp_path, "cabal.project", "packages: demo\n")
+    source = _write(tmp_path, "demo/src/Demo.hs", "module Demo where\nopen = pure ()\n")
+    assert haskell_projects(tmp_path, [source]) == [tmp_path.resolve()]
+    assert haskell_coverage_command(tmp_path) == [
+        "cabal",
+        "test",
+        "all:tests",
+        "--enable-coverage",
+        "--test-show-details=direct",
+    ]
+
+
+def test_haskell_supports_stack_and_a_standalone_cabal_package(tmp_path):
+    stack = tmp_path / "stacked"
+    _write(stack, "stack.yaml", "resolver: lts-24.0\n")
+    stack_source = _write(stack, "src/Demo.hs", "module Demo where\n")
+    cabal = tmp_path / "caballed"
+    _write(cabal, "demo.cabal", "name: demo\n")
+    cabal_source = _write(cabal, "src/Demo.hs", "module Demo where\n")
+    assert haskell_projects(tmp_path, [stack_source, cabal_source]) == [
+        cabal.resolve(),
+        stack.resolve(),
+    ]
+    assert haskell_coverage_command(stack) == ["stack", "test", "--coverage"]
+    assert haskell_coverage_command(cabal) == [
+        "cabal",
+        "test",
+        "--enable-coverage",
+        "--test-show-details=direct",
+    ]
+
+
+def test_haskell_cleanup_only_removes_stale_hpc_reports(tmp_path):
+    html = _write(
+        tmp_path,
+        "dist-newstyle/build/demo/hpc/vanilla/html/Demo.hs.html",
+        "stale",
+    )
+    index = _write(
+        tmp_path,
+        "dist-newstyle/build/demo/hpc/vanilla/html/hpc_index.html",
+        "stale",
+    )
+    tix = _write(tmp_path, "dist-newstyle/build/demo/hpc/vanilla/tix/demo.tix", "stale")
+    mix = _write(tmp_path, "dist-newstyle/build/demo/hpc/vanilla/mix/Demo.mix", "keep")
+    unrelated = _write(tmp_path, "dist-newstyle/build/demo/result.txt", "keep")
+    _clean_haskell_reports(tmp_path)
+    assert not html.exists()
+    assert not index.exists()
+    assert not tix.exists()
+    assert mix.is_file()
+    assert unrelated.is_file()
 
 
 def test_manifests_are_restored_after_a_coverage_install(tmp_path):
@@ -263,6 +321,8 @@ def test_coverage_commands_are_issued_per_language(tmp_path, monkeypatch):
     _write(tmp_path, "src/app.py", "def run():\n    return 1\n")
     _write(tmp_path, "Cargo.toml", '[package]\nname = "demo"\nversion = "0.1.0"\n')
     _write(tmp_path, "src/lib.rs", "pub fn open() {}\n")
+    _write(tmp_path, "cabal.project", "packages: .\n")
+    _write(tmp_path, "src/Demo.hs", "module Demo where\nopen = pure ()\n")
     files = [
         tmp_path / "src/demo/core.clj",
         tmp_path / "src/Board.java",
@@ -270,6 +330,7 @@ def test_coverage_commands_are_issued_per_language(tmp_path, monkeypatch):
         tmp_path / "src/ui.ts",
         tmp_path / "src/app.py",
         tmp_path / "src/lib.rs",
+        tmp_path / "src/Demo.hs",
     ]
     run_coverage(tmp_path, files, None)
     text = "\n".join(_as_text(command) for command in commands)
@@ -280,6 +341,7 @@ def test_coverage_commands_are_issued_per_language(tmp_path, monkeypatch):
     assert "vitest" in text
     assert "coverage run" in text
     assert "cargo llvm-cov" in text
+    assert "cabal test all:tests --enable-coverage" in text
     run_coverage(tmp_path, files, "echo custom")
     assert commands[-1] == "echo custom"
 

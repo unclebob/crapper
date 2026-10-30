@@ -19,6 +19,7 @@ EXTENSIONS = {
     ".mjs": "typescript",
     ".cjs": "typescript",
     ".rs": "rust",
+    ".hs": "haskell",
     ".py": "python",
 }
 
@@ -64,6 +65,7 @@ JS_TEST_SUFFIXES = (
     ".test.cjs",
     ".spec.cjs",
 )
+HASKELL_TEST_SUFFIXES = ("Spec.hs", "Test.hs")
 
 
 def language_of(path: str | Path) -> str | None:
@@ -86,6 +88,8 @@ def is_test_file(path: str | Path) -> bool:
     if name == "conftest.py":
         return True
     if name.endswith("_test.py") or (name.startswith("test_") and name.endswith(".py")):
+        return True
+    if name.endswith(HASKELL_TEST_SUFFIXES):
         return True
     return any(part in TEST_DIRS for part in file_path.parts)
 

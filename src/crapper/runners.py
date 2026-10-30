@@ -70,7 +70,7 @@ def _clean_dir(path: Path) -> None:
         shutil.rmtree(path)
 
 
-_COVERAGE_DIRS = {"typescript", "rust", "go", "python"}
+_COVERAGE_DIRS = {"typescript", "rust", "go", "python", "haskell"}
 
 
 def _outside_language_dirs(coverage: Path, path: Path) -> bool:
@@ -293,6 +293,59 @@ def rust_modules(root: Path, files: list[Path]) -> list[Path]:
         module.resolve()
         for module in _modules_with(files, ".rs", "Cargo.toml", root)
     ]
+
+
+def _haskell_project(start: Path, stop: Path) -> Path | None:
+    start = start.resolve()
+    current = start if start.is_dir() else start.parent
+    stop = stop.resolve()
+    cabal_package = None
+    while True:
+        if (current / "stack.yaml").is_file() or (current / "cabal.project").is_file():
+            return current.resolve()
+        if cabal_package is None and any(current.glob("*.cabal")):
+            cabal_package = current.resolve()
+        if current == stop or current.parent == current:
+            return cabal_package
+        current = current.parent
+
+
+def haskell_projects(root: Path, files: list[Path]) -> list[Path]:
+    root = root.resolve()
+    projects = {
+        project
+        for file in files
+        if language_of(file) == "haskell"
+        for project in [_haskell_project(Path(file), root)]
+        if project is not None
+    }
+    return sorted(projects)
+
+
+def haskell_coverage_command(project: Path) -> list[str] | None:
+    if (project / "stack.yaml").is_file():
+        return ["stack", "test", "--coverage"]
+    command = ["cabal", "test"]
+    if (project / "cabal.project").is_file():
+        command.append("all:tests")
+    elif not any(project.glob("*.cabal")):
+        return None
+    command.extend(["--enable-coverage", "--test-show-details=direct"])
+    return command
+
+
+def _clean_haskell_reports(project: Path) -> None:
+    for relative in ("dist-newstyle", ".stack-work"):
+        build = project / relative
+        if not build.is_dir():
+            continue
+        for path in build.rglob("*"):
+            if "hpc" not in path.parts or not path.is_file():
+                continue
+            if path.suffix == ".tix" or path.name.endswith(".hs.html") or path.name.startswith(
+                "hpc_index"
+            ):
+                path.unlink()
 
 
 def _rust_kind() -> str | None:
@@ -562,6 +615,21 @@ def _cover_rust(root: Path, files: list[Path]) -> None:
             _warn(f"Rust coverage exited {code} in {module}. Rust coverage will score 0%.")
 
 
+def _cover_haskell(root: Path, files: list[Path]) -> None:
+    projects = haskell_projects(root, files)
+    if not projects:
+        _warn("No stack.yaml, cabal.project, or .cabal file; skipping Haskell coverage.")
+        return
+    for project in projects:
+        command = haskell_coverage_command(project)
+        if command is None:
+            continue
+        _clean_haskell_reports(project)
+        code = run_shell(command, project)
+        if code != 0:
+            _warn(f"Haskell coverage exited {code} in {project}. Haskell coverage will score 0%.")
+
+
 def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
     """Generate coverage reports for the languages present in `files`.
 
@@ -593,4 +661,6 @@ def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
         _cover_python(root, files)
     if "rust" in languages:
         _cover_rust(root, files)
+    if "haskell" in languages:
+        _cover_haskell(root, files)
     return 0

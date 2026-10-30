@@ -12,6 +12,7 @@ from crapper.coverage import CoverageBundle, load_bundle
 from crapper.discover import (
     CLOJURE_TEST_SUFFIXES,
     GO_TEST_SUFFIX,
+    HASKELL_TEST_SUFFIXES,
     JS_TEST_SUFFIXES,
     SKIP_DIRS,
     TEST_DIRS,
@@ -32,6 +33,7 @@ _TEST_PATTERNS = ", ".join(
         "test_*.py",
         "*_test.py",
         "conftest.py",
+        *[f"*{suffix}" for suffix in HASKELL_TEST_SUFFIXES],
     ]
 )
 
@@ -44,7 +46,7 @@ and prints a report sorted worst first.
 
 Languages: Clojure (.clj .cljc .cljs .bb), Java (.java), Go (.go),
 TypeScript and JavaScript (.ts .tsx .mts .cts .js .jsx .mjs .cjs),
-Rust (.rs), Python (.py).
+Rust (.rs), Python (.py), Haskell (.hs).
 
 Options:
   -h, --help                    Print this help and exit.
@@ -76,6 +78,7 @@ Coverage, when it is produced:
   TypeScript   npm run coverage, Vitest's own LCOV, or c8 around npm test
   Rust         cargo llvm-cov, or cargo tarpaulin, in the nearest Cargo.toml
   Python       coverage.py LCOV, via pytest or unittest, per project
+  Haskell      Cabal or Stack HPC markup
 
 uml-viewer joins .metrics/crap.edn on :namespace and :name.
   Clojure      the ns, and the defn name
@@ -84,6 +87,7 @@ uml-viewer joins .metrics/crap.edn on :namespace and :name.
   TypeScript   dotted module path, or module.Class for methods
   Rust         crate::module, or crate::module::Type for methods
   Python       dotted module path, or module.Class for methods
+  Haskell      module, or module.instance-head for instance methods
 """
 
 

@@ -4,6 +4,7 @@ from crapper.coverage import (
     load_bundle,
     parse_form_coverage,
     parse_go_profile,
+    parse_hpc_markup,
     parse_jacoco_index,
     parse_lcov,
 )
@@ -33,6 +34,36 @@ def test_cloverage_form_counts_and_lcov_lines():
     bundle = CoverageBundle(lcov=parsed, form_html={"src/demo/core.clj": {4: (1, 2)}})
     # Form HTML wins over LCOV for Clojure, matching crap4clj.
     assert bundle.percent_for(function(start_line=3, end_line=5)) == 50.0
+
+
+def test_hpc_markup_counts_expressions_and_partial_booleans():
+    html = """\
+<span class="lineno">    4 </span><span class="istickedoff">choose ok =</span>
+<span class="lineno">    5 </span><span class="istickedoff">if <span class="tickonlytrue">ok</span></span>
+<span class="lineno">    7 </span><span class="istickedoff">else <span class="nottickedoff">0</span></span>
+"""
+    assert parse_hpc_markup(html) == {4: (1, 1), 5: (2, 3), 7: (1, 2)}
+
+
+def test_load_bundle_reads_cabal_hpc_markup(tmp_path):
+    markup = (
+        tmp_path
+        / "dist-newstyle/build/x/ghc/demo/t/demo-test/hpc/vanilla/html/demo-inplace/Demo.hs.html"
+    )
+    markup.parent.mkdir(parents=True)
+    markup.write_text(
+        '<span class="lineno">    4 </span><span class="istickedoff">choose ok =</span>\n'
+        '<span class="lineno">    5 </span><span class="nottickedoff">0</span>\n',
+        encoding="utf-8",
+    )
+    scored = function(
+        path="src/Demo.hs",
+        language="haskell",
+        namespace="Demo",
+        start_line=4,
+        end_line=5,
+    )
+    assert load_bundle(tmp_path).percent_for(scored) == 50.0
 
 
 def test_lcov_percentage_when_there_is_no_html():

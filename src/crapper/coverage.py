@@ -1,4 +1,4 @@
-"""Load Cloverage, LCOV, JaCoCo, and Go coverage profiles.
+"""Load Cloverage, LCOV, JaCoCo, Go, and Haskell HPC coverage profiles.
 
 Clojure prefers Cloverage's per-line form counts, then LCOV. Java uses JaCoCo
 instruction counters. Go uses statement profiles. LCOV scores a function by
@@ -22,6 +22,8 @@ _SPAN = re.compile(
 _LCOV_DA = re.compile(r"DA:(\d+),(\d+)")
 _LCOV_BRDA = re.compile(r"BRDA:(\d+),([^,]*),([^,]*),(-|\d+)")
 _DOCTYPE = re.compile(r"<!DOCTYPE[^>]*>", re.IGNORECASE)
+_HPC_LINE = re.compile(r'<span\s+class="lineno">\s*(\d+)\s*</span>')
+_HPC_TICK = re.compile(r'<span\s+class="(istickedoff|nottickedoff|tickonlytrue|tickonlyfalse)"')
 
 
 class FileCoverage(dict):
@@ -228,6 +230,31 @@ def parse_form_coverage(html: str) -> dict[int, tuple[int, int]]:
     return found
 
 
+def parse_hpc_markup(html: str) -> dict[int, tuple[int, int]]:
+    """Convert ``hpc markup`` spans to covered/total ticks per source line."""
+
+    markers = list(_HPC_LINE.finditer(html))
+    found: dict[int, tuple[int, int]] = {}
+    for index, marker in enumerate(markers):
+        stop = markers[index + 1].start() if index + 1 < len(markers) else len(html)
+        classes = _HPC_TICK.findall(html[marker.end() : stop])
+        if not classes:
+            continue
+        covered = 0
+        total = 0
+        for name in classes:
+            if name == "istickedoff":
+                covered += 1
+                total += 1
+            elif name == "nottickedoff":
+                total += 1
+            else:
+                covered += 1
+                total += 2
+        found[int(marker.group(1))] = (covered, total)
+    return found
+
+
 def _branch_hit(taken: str) -> bool:
     if taken == "-":
         return False
@@ -424,6 +451,7 @@ class CoverageBundle:
     go_profile: dict[str, list[tuple[int, int, int, int]]] | None = None
     jacoco: dict[str, list[JacocoMethod]] | None = None
     form_html: dict[str, dict[int, tuple[int, int]]] = field(default_factory=dict)
+    hpc_html: dict[str, dict[int, tuple[int, int]]] = field(default_factory=dict)
     source_parts: list[tuple[str, ...]] = field(default_factory=list)
 
     def bind_sources(self, paths: list[str]) -> None:
@@ -440,23 +468,9 @@ class CoverageBundle:
         self.source_parts = found
 
     def percent_for(self, function: Function) -> float | None:
-        if function.language == "java":
-            names = []
-            if function.jacoco_class:
-                names.append(function.jacoco_class)
-            if function.namespace not in names:
-                names.append(function.namespace)
-            return _jacoco_from_index(
-                self.jacoco or {}, names, function.name, function.start_line
-            )
-        if function.language == "go":
-            return go_percent(
-                self.go_profile,
-                function.path,
-                function.start_line,
-                function.end_line,
-                self.source_parts,
-            )
+        handled, percent = self._language_percent(function)
+        if handled:
+            return percent
         html = self._html_lines(function.path)
         if html is not None:
             return percent_for_range(html, function.start_line, function.end_line)
@@ -467,6 +481,30 @@ class CoverageBundle:
         if branched is not None:
             return branched
         return percent_for_range(record, function.start_line, function.end_line)
+
+    def _language_percent(self, function: Function) -> tuple[bool, float | None]:
+        if function.language == "java":
+            names = []
+            if function.jacoco_class:
+                names.append(function.jacoco_class)
+            if function.namespace not in names:
+                names.append(function.namespace)
+            return True, _jacoco_from_index(
+                self.jacoco or {}, names, function.name, function.start_line
+            )
+        if function.language == "go":
+            return True, go_percent(
+                self.go_profile,
+                function.path,
+                function.start_line,
+                function.end_line,
+                self.source_parts,
+            )
+        if function.language == "haskell":
+            hpc = _lookup(self.hpc_html, function.path, self.source_parts)
+            if hpc is not None:
+                return True, percent_for_range(hpc, function.start_line, function.end_line)
+        return False, None
 
     def _html_lines(self, path: str) -> dict[int, tuple[int, int]] | None:
         return _lookup(self.form_html, path, self.source_parts)
@@ -490,10 +528,15 @@ def _read(path: Path) -> str | None:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
-def _lcov_paths(root: Path) -> list[Path]:
-    paths = list(root.glob("target/coverage/**/lcov.info"))
-    paths.extend(root.glob("coverage/**/lcov.info"))
+def _glob_paths(root: Path, patterns: tuple[str, ...]) -> list[Path]:
+    paths: list[Path] = []
+    for pattern in patterns:
+        paths.extend(root.glob(pattern))
     return paths
+
+
+def _lcov_paths(root: Path) -> list[Path]:
+    return _glob_paths(root, ("target/coverage/**/lcov.info", "coverage/**/lcov.info"))
 
 
 def _merge_texts(paths: list[Path]) -> list[str]:
@@ -558,6 +601,40 @@ def _merge_forms(root: Path) -> dict[str, dict[int, tuple[int, int]]]:
     return found
 
 
+def _hpc_paths(root: Path) -> list[Path]:
+    return _glob_paths(
+        root,
+        (
+            "target/coverage/haskell/**/*.hs.html",
+            "dist-newstyle/**/hpc/**/html/**/*.hs.html",
+            ".stack-work/**/hpc/**/*.hs.html",
+        ),
+    )
+
+
+def _hpc_key(path: Path) -> str:
+    parts = list(path.parts)
+    if "html" in parts:
+        index = len(parts) - 1 - parts[::-1].index("html")
+        parts = parts[index + 1 :]
+    key = "/".join(parts)
+    return key[: -len(".html")]
+
+
+def _merge_hpc(root: Path) -> dict[str, dict[int, tuple[int, int]]]:
+    found: dict[str, dict[int, tuple[int, int]]] = {}
+    for path in _hpc_paths(root):
+        text = _read(path)
+        if not text or 'class="lineno"' not in text:
+            continue
+        key = _hpc_key(path)
+        lines = found.setdefault(key, {})
+        for line, (covered, total) in parse_hpc_markup(text).items():
+            old_covered, old_total = lines.get(line, (0, 0))
+            lines[line] = (max(old_covered, covered), max(old_total, total))
+    return found
+
+
 def load_bundle(root: Path) -> CoverageBundle:
     go_profile = _merge_go(root)
     jacoco = _merge_jacoco(root)
@@ -566,4 +643,5 @@ def load_bundle(root: Path) -> CoverageBundle:
         go_profile=go_profile or None,
         jacoco=jacoco or None,
         form_html=_merge_forms(root),
+        hpc_html=_merge_hpc(root),
     )
