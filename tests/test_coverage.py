@@ -2,6 +2,7 @@ from crapper.coverage import (
     CoverageBundle,
     go_percent,
     load_bundle,
+    parse_clover,
     parse_form_coverage,
     parse_go_profile,
     parse_jacoco_index,
@@ -127,6 +128,59 @@ def test_jacoco_skips_methods_without_an_instruction_counter():
     found = parse_jacoco_index(xml)
     assert list(found) == ["demo.pkg.Board#bad"]
     assert found["demo.pkg.Board#bad"][0].line == 0
+
+
+CLOVER = """<?xml version="1.0" encoding="UTF-8"?>
+<coverage generated="1">
+  <project timestamp="1">
+    <package name="App\\Survey">
+      <file name="/proj/app/Survey/Board.php">
+        <class name="App\\Survey\\Board" namespace="App\\Survey"/>
+        <line num="7" type="method" name="place" visibility="public" complexity="2" crap="2" count="3"/>
+        <line num="9" type="stmt" count="3"/>
+        <line num="10" type="stmt" count="0"/>
+        <line num="12" type="stmt" count="1"/>
+        <line num="15" type="method" name="id" visibility="public" complexity="1" crap="1" count="2"/>
+        <line num="16" type="method" name="name" visibility="public" complexity="1" crap="2" count="0"/>
+      </file>
+    </package>
+    <file name="/proj/helpers.php">
+      <line num="3" type="stmt" count="0"/>
+    </file>
+  </project>
+</coverage>
+"""
+
+
+def test_clover_statement_lines_score_a_php_function():
+    parsed = parse_clover(CLOVER)
+    board = parsed["/proj/app/Survey/Board.php"]
+    assert board == {9: (1, 1), 10: (0, 1), 12: (1, 1)}
+    assert board.methods == {7: (1, 1), 15: (1, 1), 16: (0, 1)}
+    assert parsed["/proj/helpers.php"] == {3: (0, 1)}
+    bundle = CoverageBundle(clover=parsed)
+
+    def method(start, end):
+        return function(
+            namespace="App.Survey.Board",
+            language="php",
+            path="/proj/app/Survey/Board.php",
+            start_line=start,
+            end_line=end,
+        )
+
+    assert bundle.percent_for(method(7, 13)) == 200 / 3
+    assert bundle.percent_for(method(15, 15)) == 100.0
+    assert bundle.percent_for(method(16, 16)) == 0.0
+    assert bundle.percent_for(function(language="php", path="/proj/missing.php")) is None
+
+
+def test_load_bundle_reads_clover_under_target_coverage(tmp_path):
+    report = tmp_path / "target" / "coverage" / "php" / "clover.xml"
+    report.parent.mkdir(parents=True)
+    report.write_text(CLOVER, encoding="utf-8")
+    bundle = load_bundle(tmp_path)
+    assert list(bundle.clover) == ["/proj/app/Survey/Board.php", "/proj/helpers.php"]
 
 
 def test_missing_go_profile_is_na():

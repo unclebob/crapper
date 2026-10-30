@@ -141,6 +141,33 @@ def test_existing_coverage_feeds_the_snapshot(tmp_path):
     assert ":crap 2.0" in text
 
 
+def test_existing_clover_report_feeds_php_functions(tmp_path):
+    _write(
+        tmp_path,
+        "app/Survey/Board.php",
+        "<?php\nnamespace App\\Survey;\n\nclass Board\n{\n"
+        "    public function place($x)\n    {\n        if ($x) {\n"
+        "            return 1;\n        }\n        return 0;\n    }\n}\n",
+    )
+    source = (tmp_path / "app" / "Survey" / "Board.php").resolve()
+    _write(
+        tmp_path,
+        "target/coverage/php/clover.xml",
+        f'<coverage><project><file name="{source}">'
+        '<line num="6" type="method" name="place" count="1"/>'
+        '<line num="8" type="stmt" count="1"/>'
+        '<line num="9" type="stmt" count="0"/>'
+        '<line num="11" type="stmt" count="1"/>'
+        "</file></project></coverage>",
+    )
+    assert run(["--root", str(tmp_path), "--use-existing-coverage"]) == 0
+    text = (tmp_path / ".metrics" / "crap.edn").read_text(encoding="utf-8")
+    assert ':name "place"' in text
+    assert ':namespace "App.Survey.Board"' in text
+    assert ":complexity 2" in text
+    assert ":coverage 66.6667" in text
+
+
 def test_threshold_exits_when_the_worst_score_is_too_high(tmp_path):
     _write(tmp_path, "src/demo/core.clj", "(ns demo.core)\n\n(defn choose [x]\n  (if x 1 0))\n")
     lcov = tmp_path / "target" / "coverage" / "lcov.info"
