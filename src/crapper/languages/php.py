@@ -1,9 +1,4 @@
-"""PHP functions, methods, and cyclomatic complexity.
-
-The namespace is the PHP namespace, plus the class for a method
-(`App\\Foo\\Bar`). A function outside any namespace takes the file's dotted
-path.
-"""
+"""PHP functions, methods, and cyclomatic complexity."""
 
 from crapper.languages.treesitter import (
     child_of_type,
