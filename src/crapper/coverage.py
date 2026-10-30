@@ -502,6 +502,8 @@ class CoverageBundle:
             )
         if function.language == "haskell":
             hpc = _lookup(self.hpc_html, function.path, self.source_parts)
+            if hpc is None:
+                hpc = _haskell_module_lookup(self.hpc_html, function)
             if hpc is not None:
                 return True, percent_for_range(hpc, function.start_line, function.end_line)
         return False, None
@@ -520,6 +522,51 @@ def _lookup(index: dict[str, dict], source_path: str, source_parts: list[tuple[s
     if key is None:
         return None
     return index[key]
+
+
+def _haskell_module_lookup(index: dict[str, dict], function: Function):
+    """Find Cabal's dotted module report for a hierarchical source path."""
+
+    ranked = [
+        (len(module), key)
+        for key in index
+        if (module := _hpc_module(key)) is not None
+        and _namespace_belongs_to(function.namespace, module)
+    ]
+    if not ranked:
+        return None
+
+    longest = max(rank for rank, _key in ranked)
+    candidates = [key for rank, key in ranked if rank == longest]
+    if len(candidates) == 1:
+        return index[candidates[0]]
+
+    source = _segments(function.path)
+    if not source:
+        return None
+    owned = [key for key in candidates if _package_owns_report(source[0], key)]
+    if len(owned) == 1:
+        return index[owned[0]]
+    return None
+
+
+def _hpc_module(key: str) -> str | None:
+    name = Path(normalize_path(key)).name
+    if not name.endswith(".hs"):
+        return None
+    return name[: -len(".hs")]
+
+
+def _namespace_belongs_to(namespace: str, module: str) -> bool:
+    return namespace == module or namespace.startswith(module + ".")
+
+
+def _package_owns_report(source_package: str, key: str) -> bool:
+    parts = _segments(key)
+    if not parts:
+        return False
+    report_package = parts[0]
+    return report_package == source_package or report_package.startswith(source_package + "-")
 
 
 def _read(path: Path) -> str | None:

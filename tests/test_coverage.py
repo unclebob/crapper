@@ -1,3 +1,5 @@
+import pytest
+
 from crapper.coverage import (
     CoverageBundle,
     go_percent,
@@ -45,25 +47,64 @@ def test_hpc_markup_counts_expressions_and_partial_booleans():
     assert parse_hpc_markup(html) == {4: (1, 1), 5: (2, 3), 7: (1, 2)}
 
 
-def test_load_bundle_reads_cabal_hpc_markup(tmp_path):
+def _write_hpc(tmp_path, package, module):
     markup = (
         tmp_path
-        / "dist-newstyle/build/x/ghc/demo/t/demo-test/hpc/vanilla/html/demo-inplace/Demo.hs.html"
+        / f"dist-newstyle/build/x/ghc/{package}/t/test/hpc/vanilla/html"
+        / f"{package}-inplace/{module}.hs.html"
     )
-    markup.parent.mkdir(parents=True)
+    markup.parent.mkdir(parents=True, exist_ok=True)
     markup.write_text(
         '<span class="lineno">    4 </span><span class="istickedoff">choose ok =</span>\n'
         '<span class="lineno">    5 </span><span class="nottickedoff">0</span>\n',
         encoding="utf-8",
     )
-    scored = function(
-        path="src/Demo.hs",
+
+
+def _haskell_function(path, namespace):
+    return function(
+        path=path,
         language="haskell",
-        namespace="Demo",
+        namespace=namespace,
         start_line=4,
         end_line=5,
     )
+
+
+@pytest.mark.parametrize(
+    "package,module,path,namespace",
+    [
+        ("demo", "Demo", "src/Demo.hs", "Demo"),
+        (
+            "hbs2-core",
+            "HBS2.Storage.Inventory",
+            "hbs2-core/lib/HBS2/Storage/Inventory.hs",
+            "HBS2.Storage.Inventory",
+        ),
+        (
+            "demo",
+            "Demo.Store",
+            "demo/lib/Demo/Store.hs",
+            "Demo.Store.HasStore MemoryStore",
+        ),
+    ],
+)
+def test_load_bundle_maps_cabal_hpc_module_names(
+    tmp_path, package, module, path, namespace
+):
+    _write_hpc(tmp_path, package, module)
+    scored = _haskell_function(path, namespace)
     assert load_bundle(tmp_path).percent_for(scored) == 50.0
+
+
+def test_hpc_module_lookup_uses_package_and_refuses_an_ambiguous_module(tmp_path):
+    _write_hpc(tmp_path, "alpha", "Shared.Store")
+    _write_hpc(tmp_path, "beta", "Shared.Store")
+    owned = _haskell_function("beta/lib/Shared/Store.hs", "Shared.Store")
+    ambiguous = _haskell_function("gamma/lib/Shared/Store.hs", "Shared.Store")
+    bundle = load_bundle(tmp_path)
+    assert bundle.percent_for(owned) == 50.0
+    assert bundle.percent_for(ambiguous) is None
 
 
 def test_lcov_percentage_when_there_is_no_html():
