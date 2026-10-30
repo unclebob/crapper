@@ -21,6 +21,7 @@ def test_language_detection():
     assert language_of("src/app.jsx") == "typescript"
     assert language_of("src/lib.rs") == "rust"
     assert language_of("src/crapper/cli.py") == "python"
+    assert language_of("app/Survey/Board.php") == "php"
     assert language_of("types.d.ts") is None
     assert language_of("notes.md") is None
     assert language_of("app.cts") == "typescript"
@@ -28,6 +29,8 @@ def test_language_detection():
     assert is_test_file("app.test.cts") is True
     assert is_test_file("app.spec.cts") is True
     assert is_test_file("app.cts") is False
+    assert is_test_file("app/Survey/BoardTest.php") is True
+    assert is_test_file("app/Survey/Board.php") is False
 
 
 def _write(root: Path, relative: str, source: str) -> None:
