@@ -158,3 +158,22 @@ def test_load_bundle_merges_each_report(tmp_path):
     assert bundle.percent_for(function(start_line=3, end_line=4)) == 50.0
     assert bundle.go_profile is not None
     assert bundle.jacoco is not None
+
+
+def test_jacoco_index_strips_internal_dtd_subset():
+    xml = """<?xml version="1.0"?>
+    <!DOCTYPE report PUBLIC "-//JACOCO//DTD Report 1.1//EN" "report.dtd" [
+      <!ELEMENT report (class*)>
+    ]>
+    <report>
+      <class name="demo/pkg/Board">
+        <method name="place" line="4">
+          <counter type="INSTRUCTION" missed="1" covered="3"/>
+        </method>
+      </class>
+    </report>
+    """
+    found = parse_jacoco_index(xml)
+    assert "demo.pkg.Board#place" in found
+    assert found["demo.pkg.Board#place"][0].percent == 75.0
+

@@ -7,6 +7,7 @@ tool, or a failed run, scores its functions at 0%.
 from __future__ import annotations
 
 import json
+import re
 import shlex
 import shutil
 import subprocess
@@ -148,6 +149,13 @@ def _uses_vitest(package: Path, scripts: dict) -> bool:
     return any((package / name).is_file() for name in _VITEST_CONFIGS)
 
 
+_SEMVER = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$")
+
+
+def _is_valid_semver(value: object) -> bool:
+    return isinstance(value, str) and _SEMVER.match(value) is not None
+
+
 def _vitest_version(package: Path) -> str | None:
     installed = package / "node_modules" / "vitest" / "package.json"
     if installed.is_file():
@@ -156,7 +164,7 @@ def _vitest_version(package: Path) -> str | None:
         except json.JSONDecodeError as exc:
             _warn(f"{installed}: {exc.msg}")
             data = None
-        if isinstance(data, dict) and isinstance(data.get("version"), str):
+        if isinstance(data, dict) and _is_valid_semver(data.get("version")):
             return data["version"]
     return None
 
@@ -192,7 +200,7 @@ def _ensure_vitest_coverage(package: Path) -> bool:
     snapshot = _manifest_snapshot(package)
     try:
         code = run_shell(
-            ["npm", "install", "--no-save", "--no-package-lock", spec],
+            ["npm", "install", "--no-save", "--no-package-lock", "--ignore-scripts", spec],
             package,
         )
     finally:
