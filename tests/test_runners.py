@@ -174,12 +174,22 @@ def test_vitest_version_and_provider_install(tmp_path, monkeypatch, capsys):
     assert "package.json" in capsys.readouterr().err
     _write(tmp_path, "node_modules/vitest/package.json", '{"version": "4.1.11"}\n')
     assert _vitest_version(tmp_path) == "4.1.11"
+    _write(tmp_path, "node_modules/vitest/package.json", '{"version": "4.1.11-beta.1+build.2"}\n')
+    assert _vitest_version(tmp_path) == "4.1.11-beta.1+build.2"
+    _write(tmp_path, "node_modules/vitest/package.json", '{"version": "file:../untrusted"}\n')
+    assert _vitest_version(tmp_path) is None
+    _write(tmp_path, "node_modules/vitest/package.json", '{"version": "4.1.11"}\n')
     provider = tmp_path / "node_modules" / "@vitest" / "coverage-v8"
     provider.mkdir(parents=True)
     assert _ensure_vitest_coverage(tmp_path) is True
     provider.rmdir()
-    monkeypatch.setattr("crapper.runners.run_shell", lambda command, cwd: 1)
+    recorded_cmds = []
+    monkeypatch.setattr(
+        "crapper.runners.run_shell",
+        lambda command, cwd: recorded_cmds.append(command) or 1,
+    )
     assert _ensure_vitest_coverage(tmp_path) is False
+    assert "--ignore-scripts" in recorded_cmds[0]
 
 
 def test_clean_clojure_keeps_other_language_reports(tmp_path):

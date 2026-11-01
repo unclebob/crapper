@@ -21,7 +21,7 @@ _SPAN = re.compile(
 )
 _LCOV_DA = re.compile(r"DA:(\d+),(\d+)")
 _LCOV_BRDA = re.compile(r"BRDA:(\d+),([^,]*),([^,]*),(-|\d+)")
-_DOCTYPE = re.compile(r"<!DOCTYPE[^>]*>", re.IGNORECASE)
+_DOCTYPE = re.compile(r"<!DOCTYPE\b(?:[^>\[]|\[[^\]]*\])*>", re.IGNORECASE | re.DOTALL)
 
 
 class FileCoverage(dict):
