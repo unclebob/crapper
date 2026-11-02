@@ -198,7 +198,7 @@ def test_d_coverage_creates_nested_report_directory_and_warns_on_failure(
         return 1
 
     monkeypatch.setattr("crapper.runners.run_shell", fail)
-    _cover_d(tmp_path, [source])
+    assert _cover_d(tmp_path, [source]) == 1
     assert "D coverage exited 1" in capsys.readouterr().err
 
 
@@ -375,7 +375,7 @@ def test_coverage_commands_are_issued_per_language(tmp_path, monkeypatch):
         tmp_path / "src/Demo.hs",
         tmp_path / "source/demo.d",
     ]
-    run_coverage(tmp_path, files, None)
+    assert run_coverage(tmp_path, files, None) != 0
     text = "\n".join(_as_text(command) for command in commands)
     assert "clj -M:cov --lcov" in text
     assert "clj -M:cov\n" in text or text.endswith("clj -M:cov") or "clj -M:cov" in text
@@ -398,7 +398,23 @@ def test_missing_build_files_skip_that_language(tmp_path, monkeypatch):
         _write(tmp_path, "src/app.ts", "export const n = 1\n"),
         _write(tmp_path, "src/lib.rs", "pub fn open() {}\n"),
     ]
-    run_coverage(tmp_path, files, None)
+    assert run_coverage(tmp_path, files, None) != 0
+
+
+def test_haskell_run_removes_exported_reports_before_a_failed_run(
+    tmp_path, monkeypatch
+):
+    _write(tmp_path, "cabal.project", "packages: .\n")
+    source = _write(tmp_path, "app/Main.hs", "main = pure ()\n")
+    stale = _write(
+        tmp_path,
+        "target/coverage/haskell/demo/Main.hs.html",
+        '<span class="lineno"> 1 </span><span class="istickedoff">stale</span>',
+    )
+    monkeypatch.setattr("crapper.runners.run_shell", lambda *_args: 1)
+
+    assert run_coverage(tmp_path, [source], None) == 1
+    assert not stale.exists()
 
 
 def test_run_shell_returns_the_child_status_and_reports_a_failed_start(tmp_path, monkeypatch, capsys):

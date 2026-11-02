@@ -152,6 +152,13 @@ def test_hpc_module_lookup_uses_package_and_refuses_an_ambiguous_module(tmp_path
     assert bundle.percent_for(ambiguous) is None
 
 
+def test_headerless_haskell_uses_main_for_hpc_without_changing_uml_namespace(tmp_path):
+    _write_hpc(tmp_path, "demo", "Main")
+    scored = _haskell_function("app/Runner.hs", "app.Runner")
+    scored = Function(**{**scored.__dict__, "coverage_module": "Main"})
+    assert load_bundle(tmp_path).percent_for(scored) == 50.0
+
+
 def test_lcov_percentage_when_there_is_no_html():
     lcov = parse_lcov("SF:src/demo/core.clj\nDA:3,1\nDA:4,0\nend_of_record\n")
     bundle = CoverageBundle(lcov=lcov)

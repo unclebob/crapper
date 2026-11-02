@@ -576,11 +576,12 @@ def _lookup(index: dict[str, dict], source_path: str, source_parts: list[tuple[s
 def _haskell_module_lookup(index: dict[str, dict], function: Function):
     """Find Cabal's dotted module report for a hierarchical source path."""
 
+    namespace = function.coverage_module or function.namespace
     ranked = [
         (len(module), key)
         for key in index
         if (module := _hpc_module(key)) is not None
-        and _namespace_belongs_to(function.namespace, module)
+        and _namespace_belongs_to(namespace, module)
     ]
     if not ranked:
         return None

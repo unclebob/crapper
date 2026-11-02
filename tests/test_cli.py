@@ -179,7 +179,7 @@ def test_selects_directories_filters_and_changed_files(tmp_path, monkeypatch, ca
     assert run(["--root", str(tmp_path), "--no-coverage", "--source-root", "src"]) == 0
     assert run(["--root", str(tmp_path), "--no-coverage", "src"]) == 0
     assert run(["--root", str(tmp_path), "--no-coverage", "src/demo/core.clj", "core"]) == 0
-    assert run(["--root", str(tmp_path), "--no-coverage", "notes.md"]) == 0
+    assert run(["--root", str(tmp_path), "--no-coverage", "notes.md"]) == 3
     assert "No source files" in capsys.readouterr().out
 
     monkeypatch.setattr(
@@ -228,6 +228,13 @@ def test_flags_that_only_store_a_boolean():
     assert parse_args(["--no-coverage"]).no_coverage is True
     conflict = parse_args(["--no-coverage", "--coverage-command", "true"])
     assert conflict.exit_code == 1
+
+
+@pytest.mark.parametrize("value", ["nan", "inf", "-1"])
+def test_threshold_must_be_finite_and_non_negative(value):
+    options = parse_args(["--threshold", value])
+    assert options.action == "help"
+    assert options.exit_code == 1
 
 
 def test_changed_files_follow_git_status(tmp_path, monkeypatch, capsys):
@@ -322,13 +329,14 @@ def test_a_failed_coverage_command_ignores_a_stale_report(tmp_path, monkeypatch)
     lcov.parent.mkdir(parents=True)
     lcov.write_text("SF:src/demo/core.clj\nDA:3,1\nDA:4,1\nend_of_record\n", encoding="utf-8")
     monkeypatch.setattr("crapper.cli.run_coverage", lambda *_args, **_kwargs: 3)
+    snapshot = tmp_path / ".metrics" / "crap.edn"
+    snapshot.parent.mkdir()
+    snapshot.write_text("keep me\n", encoding="utf-8")
     code = run(
         ["--root", str(tmp_path), "--coverage-command", "exit 3", "src/demo/core.clj"]
     )
-    assert code == 0
-    text = (tmp_path / ".metrics" / "crap.edn").read_text(encoding="utf-8")
-    assert ":coverage 0.0" in text
-    assert ":crap 6.0" in text
+    assert code == 3
+    assert snapshot.read_text(encoding="utf-8") == "keep me\n"
 
     monkeypatch.setattr("crapper.cli.run_coverage", lambda *_args, **_kwargs: 0)
     assert run(
@@ -336,6 +344,23 @@ def test_a_failed_coverage_command_ignores_a_stale_report(tmp_path, monkeypatch)
     ) == 0
     text = (tmp_path / ".metrics" / "crap.edn").read_text(encoding="utf-8")
     assert ":coverage 100.0" in text
+
+
+def test_parse_error_is_inconclusive_and_preserves_the_snapshot(tmp_path, capsys):
+    _write(tmp_path, "src/Broken.hs", "module Broken where\nopen = case of\n")
+    snapshot = tmp_path / ".metrics" / "crap.edn"
+    snapshot.parent.mkdir()
+    snapshot.write_text("keep me\n", encoding="utf-8")
+
+    assert run(["--root", str(tmp_path), "--no-coverage"]) == 3
+    assert snapshot.read_text(encoding="utf-8") == "keep me\n"
+    assert "could not parse" in capsys.readouterr().err
+
+
+def test_source_without_functions_is_inconclusive(tmp_path):
+    _write(tmp_path, "src/Empty.hs", "module Empty where\n")
+    assert run(["--root", str(tmp_path), "--no-coverage"]) == 3
+    assert not (tmp_path / ".metrics" / "crap.edn").exists()
 
 
 def test_changed_files_from_a_real_git_status(tmp_path):

@@ -1,7 +1,7 @@
 """Run each language's coverage tool, then leave the reports for the loader.
 
-Failures are reported and do not stop analysis. A language with no coverage
-tool, or a failed run, scores its functions at 0%.
+Failures are reported to the caller. Reports from a failed or unavailable
+tool must not be mistaken for current coverage.
 """
 
 from __future__ import annotations
@@ -514,24 +514,26 @@ def _modules_with(files: list[Path], suffix: str, marker: str, root: Path) -> li
     return sorted(modules)
 
 
-def _cover_clojure(root: Path) -> None:
+def _cover_clojure(root: Path) -> int:
     if not (root / "deps.edn").is_file() and not (root / "bb.edn").is_file():
         _warn("No deps.edn or bb.edn; skipping Clojure coverage.")
-        return
+        return 1
     _clean_clojure(root)
     code = run_shell(["clj", "-M:cov", "--lcov"], root)
     if code != 0:
         _warn("clj -M:cov --lcov failed; retrying without --lcov.")
         code = run_shell(["clj", "-M:cov"], root)
     if code != 0:
-        _warn(f"Clojure coverage exited {code}. Clojure coverage will score 0%.")
+        _warn(f"Clojure coverage exited {code}. Clojure coverage is unavailable.")
+    return code
 
 
-def _cover_java(root: Path, files: list[Path]) -> None:
+def _cover_java(root: Path, files: list[Path]) -> int:
     modules = _modules_with(files, ".java", "pom.xml", root)
     if not modules:
         _warn("No pom.xml; skipping Java coverage.")
-        return
+        return 1
+    status = 0
     for module in modules:
         _clean_dir(module / "target" / "site" / "jacoco")
         exec_file = module / "target" / "jacoco.exec"
@@ -539,14 +541,17 @@ def _cover_java(root: Path, files: list[Path]) -> None:
             exec_file.unlink()
         code = run_shell(_MAVEN, module)
         if code != 0:
-            _warn(f"Java coverage exited {code} in {module}. Java coverage will score 0%.")
+            _warn(f"Java coverage exited {code} in {module}. Java coverage is unavailable.")
+            status = status or code
+    return status
 
 
-def _cover_go(root: Path, files: list[Path]) -> None:
+def _cover_go(root: Path, files: list[Path]) -> int:
     modules = _modules_with(files, ".go", "go.mod", root)
     if not modules:
         _warn("No go.mod; skipping Go coverage.")
-        return
+        return 1
+    status = 0
     for module in modules:
         profile = module / "target" / "coverage" / "go" / "coverage.out"
         profile.parent.mkdir(parents=True, exist_ok=True)
@@ -554,7 +559,9 @@ def _cover_go(root: Path, files: list[Path]) -> None:
             profile.unlink()
         code = run_shell(["go", "test", "./...", f"-coverprofile={profile}"], module)
         if code != 0:
-            _warn(f"Go coverage exited {code} in {module}. Go coverage will score 0%.")
+            _warn(f"Go coverage exited {code} in {module}. Go coverage is unavailable.")
+            status = status or code
+    return status
 
 
 def _prepare_report(report: Path) -> None:
@@ -563,27 +570,33 @@ def _prepare_report(report: Path) -> None:
     report.parent.mkdir(parents=True, exist_ok=True)
 
 
-def _cover_typescript(root: Path, files: list[Path]) -> None:
+def _cover_typescript(root: Path, files: list[Path]) -> int:
     packages = typescript_packages(root, files)
     if not packages:
         _warn("No package.json; skipping TypeScript coverage.")
-        return
+        return 1
+    status = 0
     for package in packages:
         report = _coverage_report(root, package, "typescript")
         try:
             command = typescript_command(package, files, report.parent)
         except PackageJsonError as exc:
             _warn(str(exc))
+            status = status or 1
             continue
         if command is None:
             _warn(f"No package.json test script in {package}; skipping TypeScript coverage.")
+            status = status or 1
             continue
         if _needs_vitest_provider(command) and not _ensure_vitest_coverage(package):
+            status = status or 1
             continue
         _prepare_report(report)
         code = run_shell(command, package)
         if code != 0:
-            _warn(f"TypeScript coverage exited {code} in {package}. TypeScript coverage will score 0%.")
+            _warn(f"TypeScript coverage exited {code} in {package}. TypeScript coverage is unavailable.")
+            status = status or code
+    return status
 
 
 def _needs_vitest_provider(command: list[str]) -> bool:
@@ -603,24 +616,27 @@ def _python_kind(py: str, package: Path) -> str:
 
 def _record_python_lcov(
     package: Path, code: int, data_file: Path, lcov_cmd: str | list[str]
-) -> None:
+) -> int:
     if not data_file.exists():
         if code != 0:
-            _warn(f"Python coverage exited {code} in {package}. Python coverage will score 0%.")
-        return
+            _warn(f"Python coverage exited {code} in {package}. Python coverage is unavailable.")
+        return code or 1
     lcov_code = run_shell(lcov_cmd, package)
     if lcov_code != 0:
-        _warn(f"coverage lcov exited {lcov_code} in {package}. Python coverage will score 0%.")
+        _warn(f"coverage lcov exited {lcov_code} in {package}. Python coverage is unavailable.")
     elif code != 0:
         _warn(f"Python tests exited {code} in {package}. Coverage was still recorded.")
+    return code or lcov_code
 
 
-def _cover_python(root: Path, files: list[Path]) -> None:
+def _cover_python(root: Path, files: list[Path]) -> int:
+    status = 0
     for package in python_roots(root, files):
         report = _coverage_report(root, package, "python")
         py = _python_executable(package)
         if not _ensure_python_module(py, package, "coverage"):
-            _warn(f"coverage is missing in {package}. Python coverage will score 0%.")
+            _warn(f"coverage is missing in {package}. Python coverage is unavailable.")
+            status = status or 1
             continue
         report.parent.mkdir(parents=True, exist_ok=True)
         data_file = report.parent / ".coverage"
@@ -629,46 +645,57 @@ def _cover_python(root: Path, files: list[Path]) -> None:
         run_cmd, lcov_cmd = python_coverage_commands(
             py, _python_kind(py, package), data_file, report, python_sources(package, files)
         )
-        _record_python_lcov(package, run_shell(run_cmd, package), data_file, lcov_cmd)
+        code = _record_python_lcov(package, run_shell(run_cmd, package), data_file, lcov_cmd)
+        status = status or code
+    return status
 
 
-def _cover_rust(root: Path, files: list[Path]) -> None:
+def _cover_rust(root: Path, files: list[Path]) -> int:
     modules = rust_modules(root, files)
     if not modules:
         _warn("No Cargo.toml; skipping Rust coverage.")
-        return
+        return 1
     kind = _rust_kind()
     if kind is None:
-        return
+        return 1
+    status = 0
     for module in modules:
         report = _coverage_report(root, module, "rust")
         report.parent.mkdir(parents=True, exist_ok=True)
         report.unlink(missing_ok=True)
         code = run_shell(rust_coverage_command(kind, report), module)
         if code != 0:
-            _warn(f"Rust coverage exited {code} in {module}. Rust coverage will score 0%.")
+            _warn(f"Rust coverage exited {code} in {module}. Rust coverage is unavailable.")
+            status = status or code
+    return status
 
 
-def _cover_haskell(root: Path, files: list[Path]) -> None:
+def _cover_haskell(root: Path, files: list[Path]) -> int:
     projects = haskell_projects(root, files)
     if not projects:
         _warn("No stack.yaml, cabal.project, or .cabal file; skipping Haskell coverage.")
-        return
+        return 1
+    _clean_dir(root / "target" / "coverage" / "haskell")
+    status = 0
     for project in projects:
         command = haskell_coverage_command(project)
         if command is None:
+            status = status or 1
             continue
         _clean_haskell_reports(project)
         code = run_shell(command, project)
         if code != 0:
-            _warn(f"Haskell coverage exited {code} in {project}. Haskell coverage will score 0%.")
+            _warn(f"Haskell coverage exited {code} in {project}. Haskell coverage is unavailable.")
+            status = status or code
+    return status
 
 
-def _cover_d(root: Path, files: list[Path]) -> None:
+def _cover_d(root: Path, files: list[Path]) -> int:
     projects = d_projects(root, files)
     if not projects:
         _warn("No dub.json or dub.sdl; skipping D coverage.")
-        return
+        return 1
+    status = 0
     for project in projects:
         report_dir = _coverage_report(root, project, "d").parent
         if report_dir.exists():
@@ -676,7 +703,9 @@ def _cover_d(root: Path, files: list[Path]) -> None:
         report_dir.mkdir(parents=True)
         code = run_shell(d_coverage_command(report_dir), project)
         if code != 0:
-            _warn(f"D coverage exited {code} in {project}. D coverage will score 0%.")
+            _warn(f"D coverage exited {code} in {project}. D coverage is unavailable.")
+            status = status or code
+    return status
 
 
 def _coverage_actions(root: Path, files: list[Path]):
@@ -695,9 +724,7 @@ def _coverage_actions(root: Path, files: list[Path]):
 def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
     """Generate coverage reports for the languages present in `files`.
 
-    Returns the custom command's status. A non-zero status means the caller
-    must not read reports already on disk. Per-language runs return 0; a
-    failed tool is reported and that language scores 0% when it wrote nothing.
+    A non-zero status means the caller must not read reports already on disk.
     """
 
     root = root.resolve()
@@ -711,8 +738,10 @@ def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
         return code
 
     actions = _coverage_actions(root, files)
-    for language in _languages_in(files):
+    status = 0
+    for language in sorted(_languages_in(files)):
         action = actions.get(language)
         if action is not None:
-            action()
-    return 0
+            code = action()
+            status = status or code
+    return status

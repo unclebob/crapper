@@ -90,7 +90,7 @@ By default a run deletes the previous report for each language it is about to me
 | Haskell | `cabal test --enable-coverage` or `stack test --coverage` | Cabal/Stack HPC HTML under their build directory |
 | D | `dub test --coverage --force` in each DUB package | `target/coverage/d/**/*.lst` |
 
-A missing tool or a failed test run scores that language at 0% and still writes the snapshot. Pass `--coverage-command` to replace those defaults with one command of your own. `--no-coverage` is the run that leaves coverage and CRAP as N/A.
+A missing tool or failed test run makes the analysis inconclusive: the process exits `3` and preserves the last snapshot instead of turning stale or absent data into a 0% score. The same exit is used for malformed source and an empty selection. Pass `--coverage-command` to replace the defaults with one command of your own. `--no-coverage` is the explicit run that leaves coverage and CRAP as N/A.
 
 ## Development
 

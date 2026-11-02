@@ -4,6 +4,10 @@ from functools import lru_cache
 from pathlib import Path
 
 
+class ParseError(ValueError):
+    """Tree-sitter could not build a complete syntax tree."""
+
+
 @lru_cache(maxsize=None)
 def parser_for(language: str):
     from tree_sitter_language_pack import download, get_parser
@@ -15,6 +19,8 @@ def parser_for(language: str):
 def parse(source: str, language: str):
     data = source.encode("utf-8")
     tree = parser_for(language).parse(data)
+    if tree.root_node.has_error:
+        raise ParseError(f"could not parse {language} source")
     return data, tree
 
 

@@ -144,7 +144,8 @@ def functions_in_source(
     source: str, path: str, project_root: str | None = None
 ) -> list[Function]:
     data, tree = parse(source, "haskell")
-    module = _module_header(data, tree.root_node) or _fallback_module(path, project_root)
+    declared_module = _module_header(data, tree.root_node)
+    module = declared_module or _fallback_module(path, project_root)
     groups: dict[tuple[str, str], list] = {}
     for node in descendants(tree.root_node):
         if not _is_definition(node):
@@ -168,6 +169,7 @@ def functions_in_source(
                 end_line=end_line(last),
                 path=path,
                 language="haskell",
+                coverage_module=declared_module or "Main",
                 start_byte=first.start_byte,
                 end_byte=last.end_byte,
             )

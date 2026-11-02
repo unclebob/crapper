@@ -62,6 +62,7 @@ outer x = let local y
 def test_path_is_the_module_fallback_when_there_is_no_header():
     found = functions_in_source("open ok = if ok then 1 else 0\n", "src/HBS2/Peer/Lease.hs")
     assert found[0].namespace == "HBS2.Peer.Lease"
+    assert found[0].coverage_module == "Main"
 
 
 def test_class_default_methods_use_the_class_namespace():
