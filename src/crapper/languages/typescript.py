@@ -14,6 +14,7 @@ grammar and these same rules.
 from crapper.languages.treesitter import (
     binary_logic,
     child_of_type,
+    claim,
     complexity,
     descendants,
     end_line,
@@ -336,18 +337,6 @@ def _route_label(method: str, path: str | None) -> str:
     return label
 
 
-def _claim(used: set[str], name: str) -> str:
-    if name not in used:
-        used.add(name)
-        return name
-    number = 2
-    while f"{name}#{number}" in used:
-        number += 1
-    chosen = f"{name}#{number}"
-    used.add(chosen)
-    return chosen
-
-
 def _collect_routes(routes: list, data: bytes, call) -> None:
     method = _route_method(data, call)
     if method is None:
@@ -368,7 +357,7 @@ def _append_routes(found, routes, data, module, path) -> None:
         _append(
             found,
             callback,
-            name=_claim(used, _route_label(method, route)),
+            name=claim(used, _route_label(method, route)),
             namespace=module,
             complexity=_complexity(data, callback),
             start_line=start_line(callback),

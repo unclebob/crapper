@@ -103,3 +103,119 @@ def literal():
     assert [(fn.namespace, fn.name, fn.complexity) for fn in functions] == [
         ("demo", "literal", 1)
     ]
+
+
+def test_route_handlers_in_a_factory_are_their_own_entries():
+    source = """
+def build_router(config):
+    router = APIRouter()
+    if config.debug:
+        router.debug = True
+
+    @router.get("/users/{user_id}", response_model=User)
+    async def user(user_id: str):
+        if not user_id:
+            return None
+        return user_id
+
+    @router.post("/users", include_in_schema=config.debug or config.docs)
+    @requires("admin")
+    async def add_user(body):
+        return body if body else None
+
+    @router.api_route(path="/sync", methods=["GET", "post"])
+    def sync():
+        return 1
+
+    @app.route("/legacy")
+    def legacy():
+        return 1
+
+    @router.get("/users/{user_id}")
+    async def user_again(user_id: str):
+        return user_id
+
+    @router.get("/users/{user_id}")
+    async def user_third(user_id: str):
+        return user_id
+
+    @router.delete(PATHS.user)
+    def remove():
+        return 1
+
+    @router.get(f"{PREFIX}/items")
+    def items():
+        return 1
+
+    @router.get("")
+    def root():
+        return 1
+
+    def helper(x):
+        return 1 if x else 0
+
+    return router
+"""
+    functions = functions_in_source(source, "src/demo/api.py", "/proj")
+    assert [(fn.namespace, fn.name, fn.complexity) for fn in functions] == [
+        ("demo.api", "build_router", 4),
+        ("demo.api", "GET /users/{user_id}", 2),
+        ("demo.api", "POST /users", 2),
+        ("demo.api", "GET|POST /sync", 1),
+        ("demo.api", "GET /legacy", 1),
+        ("demo.api", "GET /users/{user_id}#2", 1),
+        ("demo.api", "GET /users/{user_id}#3", 1),
+        ("demo.api", "DELETE PATHS.user", 1),
+        ("demo.api", "GET {PREFIX}/items", 1),
+        ("demo.api", "GET", 1),
+    ]
+    handler = functions[1]
+    assert (handler.start_line, handler.end_line) == (8, 11)
+
+
+def test_top_level_handlers_keep_their_names_and_lookalikes_stay_nested():
+    source = """
+@app.get("/health")
+def health():
+    return 1
+
+class Views:
+    @router.get("/items")
+    def items(self):
+        return 1
+
+def decorate(fn):
+    @functools.wraps(fn)
+    def wrapper(*args):
+        return fn(*args) if args else None
+
+    @mock.patch("pkg.mod.attr")
+    def patched(mocked):
+        return 1 if mocked else 0
+
+    @router.get()
+    def unrouted(flag):
+        return 1 if flag else 0
+
+    @router.get(build_path())
+    def computed(flag):
+        return 1 if flag else 0
+
+    @cache
+    @retry(3)
+    def cached(flag):
+        return 1 if flag else 0
+
+    @router.route("/many", methods=METHODS)
+    def many():
+        return 1
+
+    return wrapper
+"""
+    functions = functions_in_source(source, "src/demo/api.py", "/proj")
+    assert [(fn.namespace, fn.name, fn.complexity) for fn in functions] == [
+        ("demo.api", "health", 1),
+        ("demo.api.Views", "items", 1),
+        ("demo.api", "decorate", 6),
+        ("demo.api", "GET /many", 1),
+    ]
