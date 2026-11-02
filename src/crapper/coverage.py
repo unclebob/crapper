@@ -458,21 +458,30 @@ class CoverageBundle:
                 self.source_parts,
             )
         html = self._html_lines(function.path)
+        first = _first_line(function)
         if html is not None:
-            return percent_for_range(html, function.start_line, function.end_line)
+            return percent_for_range(html, first, function.end_line)
         record = self._lcov_lines(function.path)
         if record is None:
             return None
-        branched = branch_percent(record, function.start_line, function.end_line)
+        branched = branch_percent(record, first, function.end_line)
         if branched is not None:
             return branched
-        return percent_for_range(record, function.start_line, function.end_line)
+        return percent_for_range(record, first, function.end_line)
 
     def _html_lines(self, path: str) -> dict[int, tuple[int, int]] | None:
         return _lookup(self.form_html, path, self.source_parts)
 
     def _lcov_lines(self, path: str) -> dict[int, tuple[int, int]] | None:
         return _lookup(self.lcov, path, self.source_parts)
+
+
+def _first_line(function: Function) -> int:
+    """Where line and branch coverage start: the body, when the scanner records it."""
+
+    if function.body_line > 0:
+        return function.body_line
+    return function.start_line
 
 
 def _lookup(index: dict[str, dict], source_path: str, source_parts: list[tuple[str, ...]]):

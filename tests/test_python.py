@@ -103,3 +103,28 @@ def literal():
     assert [(fn.namespace, fn.name, fn.complexity) for fn in functions] == [
         ("demo", "literal", 1)
     ]
+
+
+def test_coverage_starts_at_the_body_while_the_entry_starts_at_def():
+    source = '''
+@cache
+def decorated(x):
+    return x
+
+
+def signature(
+    a,
+    b,
+):
+    """Docstring."""
+    return a + b
+
+
+def one_line(x): return x
+'''
+    functions = functions_in_source(source, "src/demo/lines.py", "/proj")
+    assert [(fn.name, fn.start_line, fn.body_line) for fn in functions] == [
+        ("decorated", 3, 4),
+        ("signature", 7, 11),
+        ("one_line", 15, 15),
+    ]
