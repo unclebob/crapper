@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+import math
 import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from crapper.analyze import analyze_files
-from crapper.coverage import CoverageBundle, load_bundle
+from crapper.coverage import load_bundle
 from crapper.discover import (
     CLOJURE_TEST_SUFFIXES,
     GO_TEST_SUFFIX,
+    HASKELL_TEST_SUFFIXES,
     JS_TEST_SUFFIXES,
     SKIP_DIRS,
     TEST_DIRS,
@@ -20,6 +22,7 @@ from crapper.discover import (
     language_of,
 )
 from crapper.metrics import write_metrics
+from crapper.languages.treesitter import ParseError
 from crapper.report import format_report
 from crapper.runners import run_coverage
 
@@ -32,6 +35,7 @@ _TEST_PATTERNS = ", ".join(
         "test_*.py",
         "*_test.py",
         "conftest.py",
+        *[f"*{suffix}" for suffix in HASKELL_TEST_SUFFIXES],
     ]
 )
 
@@ -44,7 +48,7 @@ and prints a report sorted worst first.
 
 Languages: Clojure (.clj .cljc .cljs .bb), Java (.java), Go (.go),
 TypeScript and JavaScript (.ts .tsx .mts .cts .js .jsx .mjs .cjs),
-Rust (.rs), Python (.py).
+Rust (.rs), Python (.py), Haskell (.hs), D (.d).
 
 Options:
   -h, --help                    Print this help and exit.
@@ -59,6 +63,12 @@ Options:
   --coverage-command <cmd>      Run this command instead of the per-language
                                 coverage tools, then read the reports it wrote.
   --threshold <number>          Exit 2 when the worst CRAP score is above this.
+
+Exit status:
+  0  Analysis completed and the threshold passed.
+  1  Invalid command line.
+  2  CRAP threshold exceeded.
+  3  Analysis was inconclusive (no source, parse, or coverage failure).
 
 Arguments:
   path              File or directory to analyze. Test paths are included when
@@ -76,6 +86,8 @@ Coverage, when it is produced:
   TypeScript   npm run coverage, Vitest's own LCOV, or c8 around npm test
   Rust         cargo llvm-cov, or cargo tarpaulin, in the nearest Cargo.toml
   Python       coverage.py LCOV, via pytest or unittest, per project
+  Haskell      Cabal or Stack HPC markup
+  D            dub test --coverage, then compiler .lst line coverage
 
 uml-viewer joins .metrics/crap.edn on :namespace and :name.
   Clojure      the ns, and the defn name
@@ -84,6 +96,8 @@ uml-viewer joins .metrics/crap.edn on :namespace and :name.
   TypeScript   dotted module path, or module.Class for methods
   Rust         crate::module, or crate::module::Type for methods
   Python       dotted module path, or module.Class for methods
+  Haskell      module, or module.instance-head for instance methods
+  D            module, or module.Aggregate for methods
 """
 
 
@@ -135,6 +149,8 @@ def parse_args(argv: list[str] | None = None) -> Options:
                     options.threshold = float(raw)
                 except ValueError as exc:
                     raise ValueError("--threshold requires a number") from exc
+                if not math.isfinite(options.threshold) or options.threshold < 0:
+                    raise ValueError("--threshold requires a finite non-negative number")
                 index += 2
                 continue
             if arg == "--no-coverage":
@@ -282,13 +298,13 @@ def _show_help(options: Options) -> int:
 
 def _coverage_bundle(options: Options, root: Path, files: list[Path]):
     if options.no_coverage:
-        return None
+        return None, 0
     if options.use_existing_coverage:
-        return load_bundle(root)
+        return load_bundle(root), 0
     status = run_coverage(root, files, options.coverage_command)
-    if options.coverage_command and status not in (0, None):
-        return CoverageBundle()
-    return load_bundle(root)
+    if status not in (0, None):
+        return None, 3
+    return load_bundle(root), 0
 
 
 def _threshold_status(options: Options, entries) -> int:
@@ -317,9 +333,20 @@ def run(argv: list[str] | None = None) -> int:
         return exc.code
     if not files:
         print("No source files to analyze.")
-        return 0
+        return 3
 
-    entries = analyze_files(files, root, _coverage_bundle(options, root, files))
+    bundle, status = _coverage_bundle(options, root, files)
+    if status:
+        print("Coverage failed; analysis is inconclusive.", file=sys.stderr)
+        return status
+    try:
+        entries = analyze_files(files, root, bundle)
+    except ParseError as exc:
+        print(str(exc), file=sys.stderr)
+        return 3
+    if not entries:
+        print("No analyzable functions; analysis is inconclusive.", file=sys.stderr)
+        return 3
     metrics = write_metrics(entries, root)
     print(format_report(entries), end="", flush=True)
     print(f"Wrote {metrics}", file=sys.stderr)

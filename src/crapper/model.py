@@ -17,6 +17,9 @@ class Function:
     # Mutator uses the span to give a nested handler the sites inside it.
     start_byte: int = -1
     end_byte: int = -1
+    # Coverage tools can name a unit differently from its UML namespace.
+    # In particular, GHC reports every headerless module as Main.
+    coverage_module: str | None = None
 
 
 @dataclass(frozen=True)

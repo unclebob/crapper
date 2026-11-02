@@ -1,7 +1,11 @@
-"""Shared tree-sitter helpers for Java, Go, TypeScript, Rust, and Python."""
+"""Shared tree-sitter helpers for Java, Go, TypeScript, Rust, Python, Haskell, and D."""
 
 from functools import lru_cache
 from pathlib import Path
+
+
+class ParseError(ValueError):
+    """Tree-sitter could not build a complete syntax tree."""
 
 
 @lru_cache(maxsize=None)
@@ -15,6 +19,8 @@ def parser_for(language: str):
 def parse(source: str, language: str):
     data = source.encode("utf-8")
     tree = parser_for(language).parse(data)
+    if tree.root_node.has_error:
+        raise ParseError(f"could not parse {language} source")
     return data, tree
 
 

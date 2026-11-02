@@ -6,6 +6,7 @@ from crapper.coverage import CoverageBundle
 from crapper.crap import make_entry, sort_entries
 from crapper.discover import language_of
 from crapper.languages import functions_in_file
+from crapper.languages.treesitter import ParseError
 from crapper.model import Entry, Function
 
 
@@ -51,6 +52,10 @@ def analyze_files(
             relative = file.relative_to(root).as_posix()
         except ValueError:
             relative = file.as_posix()
-        for function in functions_in_file(language, source, relative, str(root)):
+        try:
+            functions = functions_in_file(language, source, relative, str(root))
+        except ParseError as exc:
+            raise ParseError(f"{relative}: {exc}") from exc
+        for function in functions:
             entries.append(make_entry(function, _coverage(bundle, function)))
     return sort_entries(entries)

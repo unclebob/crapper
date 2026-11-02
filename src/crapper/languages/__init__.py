@@ -1,7 +1,9 @@
 """Per-language function extraction."""
 
 from crapper.languages.clojure import functions_in_source as clojure_functions
+from crapper.languages.dlang import functions_in_source as d_functions
 from crapper.languages.golang import functions_in_source as go_functions
+from crapper.languages.haskell import functions_in_source as haskell_functions
 from crapper.languages.java import functions_in_source as java_functions
 from crapper.languages.python import functions_in_source as python_functions
 from crapper.languages.rust import functions_in_source as rust_functions
@@ -15,6 +17,8 @@ _READERS = {
     "typescript": typescript_functions,
     "python": python_functions,
     "rust": rust_functions,
+    "haskell": haskell_functions,
+    "d": d_functions,
 }
 
 

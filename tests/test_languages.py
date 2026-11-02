@@ -9,6 +9,8 @@ _SOURCES = [
     ("typescript", "export function view() { return 1 }\n", "src/ui.ts", "view"),
     ("python", "def run():\n    return 1\n", "src/app.py", "run"),
     ("rust", "pub fn open() {}\n", "src/lib.rs", "open"),
+    ("haskell", "module Demo where\nopen = pure ()\n", "src/Demo.hs", "open"),
+    ("d", "module demo;\nint open() { return 1; }\n", "source/demo.d", "open"),
 ]
 
 

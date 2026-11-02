@@ -8,6 +8,10 @@ from crapper.runners import (
     PackageJsonError,
     _clean_clojure,
     _clean_dir,
+    _clean_haskell_reports,
+    _cover_d,
+    d_coverage_command,
+    d_projects,
     _coverage_report,
     _ensure_python_module,
     _ensure_vitest_coverage,
@@ -20,6 +24,8 @@ from crapper.runners import (
     _rust_kind,
     _vitest_version,
     python_coverage_commands,
+    haskell_coverage_command,
+    haskell_projects,
     python_roots,
     python_sources,
     run_coverage,
@@ -102,6 +108,98 @@ def test_rust_module_is_the_nearest_cargo_package(tmp_path):
     _write(tmp_path, "src-tauri/Cargo.toml", '[package]\nname = "bookwriter"\nversion = "0.1.0"\n')
     lib = _write(tmp_path, "src-tauri/src/lib.rs", "pub fn read_text() {}\n")
     assert rust_modules(tmp_path, [lib]) == [(tmp_path / "src-tauri").resolve()]
+
+
+def test_haskell_uses_the_root_cabal_project_for_all_packages(tmp_path):
+    _write(tmp_path, "cabal.project", "packages: demo\n")
+    source = _write(tmp_path, "demo/src/Demo.hs", "module Demo where\nopen = pure ()\n")
+    assert haskell_projects(tmp_path, [source]) == [tmp_path.resolve()]
+    assert haskell_coverage_command(tmp_path) == [
+        "cabal",
+        "test",
+        "all:tests",
+        "--enable-coverage",
+        "--test-show-details=direct",
+    ]
+
+
+def test_haskell_supports_stack_and_a_standalone_cabal_package(tmp_path):
+    stack = tmp_path / "stacked"
+    _write(stack, "stack.yaml", "resolver: lts-24.0\n")
+    stack_source = _write(stack, "src/Demo.hs", "module Demo where\n")
+    cabal = tmp_path / "caballed"
+    _write(cabal, "demo.cabal", "name: demo\n")
+    cabal_source = _write(cabal, "src/Demo.hs", "module Demo where\n")
+    assert haskell_projects(tmp_path, [stack_source, cabal_source]) == [
+        cabal.resolve(),
+        stack.resolve(),
+    ]
+    assert haskell_coverage_command(stack) == ["stack", "test", "--coverage"]
+    assert haskell_coverage_command(cabal) == [
+        "cabal",
+        "test",
+        "--enable-coverage",
+        "--test-show-details=direct",
+    ]
+
+
+def test_haskell_cleanup_only_removes_stale_hpc_reports(tmp_path):
+    html = _write(
+        tmp_path,
+        "dist-newstyle/build/demo/hpc/vanilla/html/Demo.hs.html",
+        "stale",
+    )
+    index = _write(
+        tmp_path,
+        "dist-newstyle/build/demo/hpc/vanilla/html/hpc_index.html",
+        "stale",
+    )
+    tix = _write(tmp_path, "dist-newstyle/build/demo/hpc/vanilla/tix/demo.tix", "stale")
+    mix = _write(tmp_path, "dist-newstyle/build/demo/hpc/vanilla/mix/Demo.mix", "keep")
+    unrelated = _write(tmp_path, "dist-newstyle/build/demo/result.txt", "keep")
+    _clean_haskell_reports(tmp_path)
+    assert not html.exists()
+    assert not index.exists()
+    assert not tix.exists()
+    assert mix.is_file()
+    assert unrelated.is_file()
+
+
+def test_d_uses_the_nearest_dub_project_and_an_isolated_coverage_directory(tmp_path):
+    package = tmp_path / "package"
+    _write(package, "dub.json", '{"name":"demo"}\n')
+    source = _write(package, "source/demo/board.d", "module demo.board;\n")
+    report_dir = tmp_path / "target" / "coverage" / "d"
+    assert d_projects(tmp_path, [source]) == [package.resolve()]
+    assert d_coverage_command(report_dir) == [
+        "dub",
+        "test",
+        "--coverage",
+        "--force",
+        "--",
+        f"--DRT-covopt=merge:1 dstpath:{report_dir}",
+    ]
+    orphan = _write(tmp_path, "orphan/demo.d", "module orphan.demo;\n")
+    assert d_projects(tmp_path, [orphan]) == []
+
+
+def test_d_coverage_creates_nested_report_directory_and_warns_on_failure(
+    tmp_path, monkeypatch, capsys
+):
+    package = tmp_path / "package"
+    _write(package, "dub.json", '{"name":"demo"}\n')
+    source = _write(package, "source/demo.d", "module demo;\n")
+    report_dir = tmp_path / "target" / "coverage" / "d" / "package"
+
+    def fail(command, cwd):
+        assert cwd == package.resolve()
+        assert command == d_coverage_command(report_dir)
+        assert report_dir.is_dir()
+        return 1
+
+    monkeypatch.setattr("crapper.runners.run_shell", fail)
+    assert _cover_d(tmp_path, [source]) == 1
+    assert "D coverage exited 1" in capsys.readouterr().err
 
 
 def test_manifests_are_restored_after_a_coverage_install(tmp_path):
@@ -263,6 +361,10 @@ def test_coverage_commands_are_issued_per_language(tmp_path, monkeypatch):
     _write(tmp_path, "src/app.py", "def run():\n    return 1\n")
     _write(tmp_path, "Cargo.toml", '[package]\nname = "demo"\nversion = "0.1.0"\n')
     _write(tmp_path, "src/lib.rs", "pub fn open() {}\n")
+    _write(tmp_path, "cabal.project", "packages: .\n")
+    _write(tmp_path, "src/Demo.hs", "module Demo where\nopen = pure ()\n")
+    _write(tmp_path, "dub.json", '{"name":"demo"}\n')
+    _write(tmp_path, "source/demo.d", "module demo;\nint open() { return 1; }\n")
     files = [
         tmp_path / "src/demo/core.clj",
         tmp_path / "src/Board.java",
@@ -270,8 +372,10 @@ def test_coverage_commands_are_issued_per_language(tmp_path, monkeypatch):
         tmp_path / "src/ui.ts",
         tmp_path / "src/app.py",
         tmp_path / "src/lib.rs",
+        tmp_path / "src/Demo.hs",
+        tmp_path / "source/demo.d",
     ]
-    run_coverage(tmp_path, files, None)
+    assert run_coverage(tmp_path, files, None) != 0
     text = "\n".join(_as_text(command) for command in commands)
     assert "clj -M:cov --lcov" in text
     assert "clj -M:cov\n" in text or text.endswith("clj -M:cov") or "clj -M:cov" in text
@@ -280,6 +384,8 @@ def test_coverage_commands_are_issued_per_language(tmp_path, monkeypatch):
     assert "vitest" in text
     assert "coverage run" in text
     assert "cargo llvm-cov" in text
+    assert "cabal test all:tests --enable-coverage" in text
+    assert "dub test --coverage --force" in text
     run_coverage(tmp_path, files, "echo custom")
     assert commands[-1] == "echo custom"
 
@@ -292,7 +398,23 @@ def test_missing_build_files_skip_that_language(tmp_path, monkeypatch):
         _write(tmp_path, "src/app.ts", "export const n = 1\n"),
         _write(tmp_path, "src/lib.rs", "pub fn open() {}\n"),
     ]
-    run_coverage(tmp_path, files, None)
+    assert run_coverage(tmp_path, files, None) != 0
+
+
+def test_haskell_run_removes_exported_reports_before_a_failed_run(
+    tmp_path, monkeypatch
+):
+    _write(tmp_path, "cabal.project", "packages: .\n")
+    source = _write(tmp_path, "app/Main.hs", "main = pure ()\n")
+    stale = _write(
+        tmp_path,
+        "target/coverage/haskell/demo/Main.hs.html",
+        '<span class="lineno"> 1 </span><span class="istickedoff">stale</span>',
+    )
+    monkeypatch.setattr("crapper.runners.run_shell", lambda *_args: 1)
+
+    assert run_coverage(tmp_path, [source], None) == 1
+    assert not stale.exists()
 
 
 def test_run_shell_returns_the_child_status_and_reports_a_failed_start(tmp_path, monkeypatch, capsys):

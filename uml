@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/usr/bin/env zsh
 # Loader for this project. Points at the local uml-viewer checkout so the
 # Python scanner is on the classpath.
 set -euo pipefail
