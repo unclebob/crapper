@@ -9,6 +9,9 @@ from crapper.runners import (
     _clean_clojure,
     _clean_dir,
     _clean_haskell_reports,
+    _cover_d,
+    d_coverage_command,
+    d_projects,
     _coverage_report,
     _ensure_python_module,
     _ensure_vitest_coverage,
@@ -160,6 +163,43 @@ def test_haskell_cleanup_only_removes_stale_hpc_reports(tmp_path):
     assert not tix.exists()
     assert mix.is_file()
     assert unrelated.is_file()
+
+
+def test_d_uses_the_nearest_dub_project_and_an_isolated_coverage_directory(tmp_path):
+    package = tmp_path / "package"
+    _write(package, "dub.json", '{"name":"demo"}\n')
+    source = _write(package, "source/demo/board.d", "module demo.board;\n")
+    report_dir = tmp_path / "target" / "coverage" / "d"
+    assert d_projects(tmp_path, [source]) == [package.resolve()]
+    assert d_coverage_command(report_dir) == [
+        "dub",
+        "test",
+        "--coverage",
+        "--force",
+        "--",
+        f"--DRT-covopt=merge:1 dstpath:{report_dir}",
+    ]
+    orphan = _write(tmp_path, "orphan/demo.d", "module orphan.demo;\n")
+    assert d_projects(tmp_path, [orphan]) == []
+
+
+def test_d_coverage_creates_nested_report_directory_and_warns_on_failure(
+    tmp_path, monkeypatch, capsys
+):
+    package = tmp_path / "package"
+    _write(package, "dub.json", '{"name":"demo"}\n')
+    source = _write(package, "source/demo.d", "module demo;\n")
+    report_dir = tmp_path / "target" / "coverage" / "d" / "package"
+
+    def fail(command, cwd):
+        assert cwd == package.resolve()
+        assert command == d_coverage_command(report_dir)
+        assert report_dir.is_dir()
+        return 1
+
+    monkeypatch.setattr("crapper.runners.run_shell", fail)
+    _cover_d(tmp_path, [source])
+    assert "D coverage exited 1" in capsys.readouterr().err
 
 
 def test_manifests_are_restored_after_a_coverage_install(tmp_path):
@@ -323,6 +363,8 @@ def test_coverage_commands_are_issued_per_language(tmp_path, monkeypatch):
     _write(tmp_path, "src/lib.rs", "pub fn open() {}\n")
     _write(tmp_path, "cabal.project", "packages: .\n")
     _write(tmp_path, "src/Demo.hs", "module Demo where\nopen = pure ()\n")
+    _write(tmp_path, "dub.json", '{"name":"demo"}\n')
+    _write(tmp_path, "source/demo.d", "module demo;\nint open() { return 1; }\n")
     files = [
         tmp_path / "src/demo/core.clj",
         tmp_path / "src/Board.java",
@@ -331,6 +373,7 @@ def test_coverage_commands_are_issued_per_language(tmp_path, monkeypatch):
         tmp_path / "src/app.py",
         tmp_path / "src/lib.rs",
         tmp_path / "src/Demo.hs",
+        tmp_path / "source/demo.d",
     ]
     run_coverage(tmp_path, files, None)
     text = "\n".join(_as_text(command) for command in commands)
@@ -342,6 +385,7 @@ def test_coverage_commands_are_issued_per_language(tmp_path, monkeypatch):
     assert "coverage run" in text
     assert "cargo llvm-cov" in text
     assert "cabal test all:tests --enable-coverage" in text
+    assert "dub test --coverage --force" in text
     run_coverage(tmp_path, files, "echo custom")
     assert commands[-1] == "echo custom"
 

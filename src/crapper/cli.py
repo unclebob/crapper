@@ -46,7 +46,7 @@ and prints a report sorted worst first.
 
 Languages: Clojure (.clj .cljc .cljs .bb), Java (.java), Go (.go),
 TypeScript and JavaScript (.ts .tsx .mts .cts .js .jsx .mjs .cjs),
-Rust (.rs), Python (.py), Haskell (.hs).
+Rust (.rs), Python (.py), Haskell (.hs), D (.d).
 
 Options:
   -h, --help                    Print this help and exit.
@@ -79,6 +79,7 @@ Coverage, when it is produced:
   Rust         cargo llvm-cov, or cargo tarpaulin, in the nearest Cargo.toml
   Python       coverage.py LCOV, via pytest or unittest, per project
   Haskell      Cabal or Stack HPC markup
+  D            dub test --coverage, then compiler .lst line coverage
 
 uml-viewer joins .metrics/crap.edn on :namespace and :name.
   Clojure      the ns, and the defn name
@@ -88,6 +89,7 @@ uml-viewer joins .metrics/crap.edn on :namespace and :name.
   Rust         crate::module, or crate::module::Type for methods
   Python       dotted module path, or module.Class for methods
   Haskell      module, or module.instance-head for instance methods
+  D            module, or module.Aggregate for methods
 """
 
 

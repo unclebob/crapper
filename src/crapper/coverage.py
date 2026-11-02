@@ -1,4 +1,4 @@
-"""Load Cloverage, LCOV, JaCoCo, Go, and Haskell HPC coverage profiles.
+"""Load Cloverage, LCOV, JaCoCo, Go, Haskell HPC, and D coverage profiles.
 
 Clojure prefers Cloverage's per-line form counts, then LCOV. Java uses JaCoCo
 instruction counters. Go uses statement profiles. LCOV scores a function by
@@ -24,6 +24,7 @@ _LCOV_BRDA = re.compile(r"BRDA:(\d+),([^,]*),([^,]*),(-|\d+)")
 _DOCTYPE = re.compile(r"<!DOCTYPE[^>]*>", re.IGNORECASE)
 _HPC_LINE = re.compile(r'<span\s+class="lineno">\s*(\d+)\s*</span>')
 _HPC_TICK = re.compile(r'<span\s+class="(istickedoff|nottickedoff|tickonlytrue|tickonlyfalse)"')
+_D_SUMMARY = re.compile(r"^(.*\.d)\s+is\s+\d+(?:\.\d+)?%\s+covered\s*$")
 
 
 class FileCoverage(dict):
@@ -255,6 +256,32 @@ def parse_hpc_markup(html: str) -> dict[int, tuple[int, int]]:
     return found
 
 
+def parse_d_coverage(text: str) -> tuple[str | None, dict[int, tuple[int, int]]]:
+    """Read DMD/LDC -cov listings and return source path plus line hits."""
+
+    source = None
+    lines: dict[int, tuple[int, int]] = {}
+    source_line = 0
+    for raw in text.splitlines():
+        summary = _D_SUMMARY.match(raw.strip())
+        if summary:
+            source = normalize_path(summary.group(1))
+            continue
+        if "|" not in raw:
+            continue
+        source_line += 1
+        count, _source_text = raw.split("|", 1)
+        count = count.strip()
+        if not count:
+            continue
+        try:
+            hits = int(count)
+        except ValueError:
+            continue
+        lines[source_line] = (1 if hits > 0 else 0, 1)
+    return source, lines
+
+
 def _branch_hit(taken: str) -> bool:
     if taken == "-":
         return False
@@ -452,6 +479,7 @@ class CoverageBundle:
     jacoco: dict[str, list[JacocoMethod]] | None = None
     form_html: dict[str, dict[int, tuple[int, int]]] = field(default_factory=dict)
     hpc_html: dict[str, dict[int, tuple[int, int]]] = field(default_factory=dict)
+    d_coverage: dict[str, dict[int, tuple[int, int]]] = field(default_factory=dict)
     source_parts: list[tuple[str, ...]] = field(default_factory=list)
 
     def bind_sources(self, paths: list[str]) -> None:
@@ -483,30 +511,51 @@ class CoverageBundle:
         return percent_for_range(record, function.start_line, function.end_line)
 
     def _language_percent(self, function: Function) -> tuple[bool, float | None]:
-        if function.language == "java":
-            names = []
-            if function.jacoco_class:
-                names.append(function.jacoco_class)
-            if function.namespace not in names:
-                names.append(function.namespace)
-            return True, _jacoco_from_index(
-                self.jacoco or {}, names, function.name, function.start_line
-            )
-        if function.language == "go":
-            return True, go_percent(
-                self.go_profile,
-                function.path,
-                function.start_line,
-                function.end_line,
-                self.source_parts,
-            )
-        if function.language == "haskell":
-            hpc = _lookup(self.hpc_html, function.path, self.source_parts)
-            if hpc is None:
-                hpc = _haskell_module_lookup(self.hpc_html, function)
-            if hpc is not None:
-                return True, percent_for_range(hpc, function.start_line, function.end_line)
-        return False, None
+        readers = {
+            "java": self._java_percent,
+            "go": self._go_percent,
+            "haskell": self._haskell_percent,
+            "d": self._d_percent,
+        }
+        reader = readers.get(function.language)
+        if reader is None:
+            return False, None
+        percent = reader(function)
+        always_handled = function.language in {"java", "go"}
+        return always_handled or percent is not None, percent
+
+    def _java_percent(self, function: Function) -> float | None:
+        names = []
+        if function.jacoco_class:
+            names.append(function.jacoco_class)
+        if function.namespace not in names:
+            names.append(function.namespace)
+        return _jacoco_from_index(
+            self.jacoco or {}, names, function.name, function.start_line
+        )
+
+    def _go_percent(self, function: Function) -> float | None:
+        return go_percent(
+            self.go_profile,
+            function.path,
+            function.start_line,
+            function.end_line,
+            self.source_parts,
+        )
+
+    def _haskell_percent(self, function: Function) -> float | None:
+        hpc = _lookup(self.hpc_html, function.path, self.source_parts)
+        if hpc is None:
+            hpc = _haskell_module_lookup(self.hpc_html, function)
+        if hpc is None:
+            return None
+        return percent_for_range(hpc, function.start_line, function.end_line)
+
+    def _d_percent(self, function: Function) -> float | None:
+        listing = _lookup(self.d_coverage, function.path, self.source_parts)
+        if listing is None:
+            return None
+        return percent_for_range(listing, function.start_line, function.end_line)
 
     def _html_lines(self, path: str) -> dict[int, tuple[int, int]] | None:
         return _lookup(self.form_html, path, self.source_parts)
@@ -682,6 +731,20 @@ def _merge_hpc(root: Path) -> dict[str, dict[int, tuple[int, int]]]:
     return found
 
 
+def _merge_d_coverage(root: Path) -> dict[str, dict[int, tuple[int, int]]]:
+    found: dict[str, dict[int, tuple[int, int]]] = {}
+    for path in root.glob("target/coverage/d/**/*.lst"):
+        text = _read(path)
+        if not text:
+            continue
+        source, parsed = parse_d_coverage(text)
+        key = source or f"{path.stem}.d"
+        lines = found.setdefault(key, {})
+        for line, pair in parsed.items():
+            lines[line] = max(lines.get(line, pair), pair)
+    return found
+
+
 def load_bundle(root: Path) -> CoverageBundle:
     go_profile = _merge_go(root)
     jacoco = _merge_jacoco(root)
@@ -691,4 +754,5 @@ def load_bundle(root: Path) -> CoverageBundle:
         jacoco=jacoco or None,
         form_html=_merge_forms(root),
         hpc_html=_merge_hpc(root),
+        d_coverage=_merge_d_coverage(root),
     )

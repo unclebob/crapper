@@ -21,6 +21,7 @@ def test_language_detection():
     assert language_of("src/app.jsx") == "typescript"
     assert language_of("src/lib.rs") == "rust"
     assert language_of("src/HBS2/Peer/Lease.hs") == "haskell"
+    assert language_of("source/demo/lease.d") == "d"
     assert language_of("src/crapper/cli.py") == "python"
     assert language_of("types.d.ts") is None
     assert language_of("notes.md") is None

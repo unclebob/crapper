@@ -70,7 +70,7 @@ def _clean_dir(path: Path) -> None:
         shutil.rmtree(path)
 
 
-_COVERAGE_DIRS = {"typescript", "rust", "go", "python", "haskell"}
+_COVERAGE_DIRS = {"typescript", "rust", "go", "python", "haskell", "d"}
 
 
 def _outside_language_dirs(coverage: Path, path: Path) -> bool:
@@ -332,6 +332,40 @@ def haskell_coverage_command(project: Path) -> list[str] | None:
         return None
     command.extend(["--enable-coverage", "--test-show-details=direct"])
     return command
+
+
+def _d_project(start: Path, stop: Path) -> Path | None:
+    current = start.resolve().parent
+    stop = stop.resolve()
+    while True:
+        if (current / "dub.json").is_file() or (current / "dub.sdl").is_file():
+            return current
+        if current == stop or current.parent == current:
+            return None
+        current = current.parent
+
+
+def d_projects(root: Path, files: list[Path]) -> list[Path]:
+    root = root.resolve()
+    projects = {
+        project
+        for file in files
+        if language_of(file) == "d"
+        for project in [_d_project(Path(file), root)]
+        if project is not None
+    }
+    return sorted(projects)
+
+
+def d_coverage_command(report_dir: Path) -> list[str]:
+    return [
+        "dub",
+        "test",
+        "--coverage",
+        "--force",
+        "--",
+        f"--DRT-covopt=merge:1 dstpath:{report_dir}",
+    ]
 
 
 def _clean_haskell_reports(project: Path) -> None:
@@ -630,6 +664,34 @@ def _cover_haskell(root: Path, files: list[Path]) -> None:
             _warn(f"Haskell coverage exited {code} in {project}. Haskell coverage will score 0%.")
 
 
+def _cover_d(root: Path, files: list[Path]) -> None:
+    projects = d_projects(root, files)
+    if not projects:
+        _warn("No dub.json or dub.sdl; skipping D coverage.")
+        return
+    for project in projects:
+        report_dir = _coverage_report(root, project, "d").parent
+        if report_dir.exists():
+            shutil.rmtree(report_dir)
+        report_dir.mkdir(parents=True)
+        code = run_shell(d_coverage_command(report_dir), project)
+        if code != 0:
+            _warn(f"D coverage exited {code} in {project}. D coverage will score 0%.")
+
+
+def _coverage_actions(root: Path, files: list[Path]):
+    return {
+        "clojure": lambda: _cover_clojure(root),
+        "java": lambda: _cover_java(root, files),
+        "go": lambda: _cover_go(root, files),
+        "typescript": lambda: _cover_typescript(root, files),
+        "python": lambda: _cover_python(root, files),
+        "rust": lambda: _cover_rust(root, files),
+        "haskell": lambda: _cover_haskell(root, files),
+        "d": lambda: _cover_d(root, files),
+    }
+
+
 def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
     """Generate coverage reports for the languages present in `files`.
 
@@ -648,19 +710,9 @@ def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
             )
         return code
 
-    languages = _languages_in(files)
-    if "clojure" in languages:
-        _cover_clojure(root)
-    if "java" in languages:
-        _cover_java(root, files)
-    if "go" in languages:
-        _cover_go(root, files)
-    if "typescript" in languages:
-        _cover_typescript(root, files)
-    if "python" in languages:
-        _cover_python(root, files)
-    if "rust" in languages:
-        _cover_rust(root, files)
-    if "haskell" in languages:
-        _cover_haskell(root, files)
+    actions = _coverage_actions(root, files)
+    for language in _languages_in(files):
+        action = actions.get(language)
+        if action is not None:
+            action()
     return 0

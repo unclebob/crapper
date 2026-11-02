@@ -7,6 +7,7 @@ from crapper.coverage import (
     parse_form_coverage,
     parse_go_profile,
     parse_hpc_markup,
+    parse_d_coverage,
     parse_jacoco_index,
     parse_lcov,
 )
@@ -45,6 +46,50 @@ def test_hpc_markup_counts_expressions_and_partial_booleans():
 <span class="lineno">    7 </span><span class="istickedoff">else <span class="nottickedoff">0</span></span>
 """
     assert parse_hpc_markup(html) == {4: (1, 1), 5: (2, 3), 7: (1, 2)}
+
+
+def test_d_listing_counts_executable_lines_and_keeps_the_source_path():
+    listing = """\
+       |module demo.board;
+      3|int choose(bool ok) {
+0000000|  if (ok) return 1;
+      2|  return 0;
+       |}
+source/demo/board.d is 66% covered
+"""
+    assert parse_d_coverage(listing) == (
+        "source/demo/board.d",
+        {2: (1, 1), 3: (0, 1), 4: (1, 1)},
+    )
+
+
+def test_load_bundle_reads_d_coverage_listings(tmp_path):
+    report = tmp_path / "target" / "coverage" / "d" / "compiler-a.lst"
+    report.parent.mkdir(parents=True)
+    report.write_text(
+        "       |module demo.board;\n"
+        "      1|int choose(bool ok) {\n"
+        "0000000|  return ok ? 1 : 0;\n"
+        "       |}\n"
+        "source/demo/board.d is 50% covered\n",
+        encoding="utf-8",
+    )
+    report.with_name("compiler-b.lst").write_text(
+        "       |module demo.board;\n"
+        "0000000|int choose(bool ok) {\n"
+        "      1|  return ok ? 1 : 0;\n"
+        "       |}\n"
+        "source/demo/board.d is 50% covered\n",
+        encoding="utf-8",
+    )
+    scored = function(
+        path="source/demo/board.d",
+        language="d",
+        namespace="demo.board",
+        start_line=2,
+        end_line=3,
+    )
+    assert load_bundle(tmp_path).percent_for(scored) == 100.0
 
 
 def _write_hpc(tmp_path, package, module):
