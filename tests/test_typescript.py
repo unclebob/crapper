@@ -115,6 +115,20 @@ function outer() {
     assert [(fn.name, fn.complexity) for fn in functions] == [("outer", 2)]
 
 
+def test_an_arrow_const_inside_a_function_stays_inside_it():
+    source = """
+function outer(x) {
+  const inner = () => {
+    if (x) return 1;
+    return 0;
+  };
+  return inner();
+}
+"""
+    functions = functions_in_source(source, "src/demo/box.ts", "/proj")
+    assert [(fn.name, fn.complexity) for fn in functions] == [("outer", 2)]
+
+
 def test_javascript_files_use_the_same_rules():
     source = """
 export function choose(a, b, c) {
