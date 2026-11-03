@@ -198,11 +198,16 @@ def test_scoverage_statements_become_line_records_and_ignored_ones_are_dropped()
 
 
 def test_load_bundle_reads_each_sbt_module_report(tmp_path):
-    report = tmp_path / "modules" / "core" / "target" / "scala-3.8.4" / "scoverage-report" / "scoverage.xml"
-    report.parent.mkdir(parents=True)
-    report.write_text(SCOVERAGE.replace("/proj/", f"{tmp_path}/modules/core/"), encoding="utf-8")
+    modules = {"": "Root", "app/": "App", "modules/core/": "Board"}
+    for module, name in modules.items():
+        report = tmp_path / module / "target" / "scala-3.8.4" / "scoverage-report" / "scoverage.xml"
+        report.parent.mkdir(parents=True)
+        source = f"{tmp_path}/{module}src/main/scala/demo/{name}"
+        text = SCOVERAGE.replace("/proj/src/main/scala/demo/Board", source)
+        report.write_text(text, encoding="utf-8")
     bundle = load_bundle(tmp_path)
-    scala = function(
-        language="scala", path="modules/core/src/main/scala/demo/Board.scala", start_line=4, end_line=5
-    )
-    assert bundle.percent_for(scala) == pytest.approx(100.0 / 3)
+    for module, name in modules.items():
+        scala = function(
+            language="scala", path=f"{module}src/main/scala/demo/{name}.scala", start_line=4, end_line=5
+        )
+        assert bundle.percent_for(scala) == pytest.approx(100.0 / 3), module
