@@ -52,7 +52,7 @@ uml-viewer groups entries by `:namespace` and joins each operation on `:name`. `
 | TypeScript | the dotted module path, or `module.Class` | the function or method name |
 | Rust | `crate::module`, or `crate::module::Type` | the function or method name |
 | Python | the dotted module path, or `module.Class` | the function or method name |
-| Scala | `package.Object` or `package.Outer.Inner`; the package alone for a top level def | the def name |
+| Scala | `package.Object` or `package.Outer.Inner`; `package.Object.given_Ordering_Int` inside a given with a body; the package alone for a top level def | the def name |
 
 Rename or move is a new entry. There is no identity matching across runs.
 
@@ -70,7 +70,7 @@ Rust counts `if`, loops, each `match` arm, `?`, and `&&` / `||`. `mod tests` is 
 
 Python counts `if`, `elif`, `for`, `while`, `except`, each `match` case, a comprehension filter, a conditional expression, and each `and` / `or`. Nested functions stay inside the enclosing function. Coverage is LCOV from `coverage.py`, running pytest when the project uses it and `unittest` otherwise. `coverage` and `pytest` are installed into the project's interpreter when they are missing.
 
-Scala counts `if`, `while`, `do`, `for`, a `for` guard, each `case` of a `match` or a `catch`, a `case` guard, and each `&&` / `||`. A lambda and a local def stay inside the enclosing method; an anonymous class body is skipped, as in Java. An abstract def and a secondary constructor are not entries. Coverage is scoverage's statement report: a statement with a positive invocation count is covered, and a method is scored by the statements on its lines.
+Scala counts `if`, `while`, `do`, `for`, a `for` guard, each `case` of a `match` or a `catch`, a `case` guard, and each `&&` / `||`. A lambda and a local def stay inside the enclosing method; an anonymous class body is skipped, as in Java. An abstract def and a secondary constructor are not entries. A def in the body of a given belongs to that given, as scalac compiles it: a named given adds its name to the namespace, and an anonymous given adds the name scalac gives it, `given_` and the type with each type argument by its outer name, so `given Ordering[Int] with` is `given_Ordering_Int` and `given Map[String, List[Int]] with` is `given_Map_String_List`. Coverage is scoverage's statement report: a statement with a positive invocation count is covered, and a method is scored by the statements on its lines.
 
 ## Coverage commands
 

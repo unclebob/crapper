@@ -93,6 +93,25 @@ def test_a_brace_less_catch_case_is_a_decision():
     assert _scored("object O { def f = try 1 catch case e: E => 2 }\n") == [("f", 2)]
 
 
+def test_a_def_in_a_given_body_belongs_to_the_class_scalac_names_for_that_given():
+    source = """package p
+object O {
+  given Ordering[Int] with { def compare(a: Int, b: Int) = 0 }
+  given named: Ordering[Long] with { def compare(a: Long, b: Long) = 0 }
+  given Map[String, List[Int]] with
+    def size = 0
+  given Ordering[Char] = Ordering.Char
+  given scala.math.Ordering[Short] with { def compare(a: Short, b: Short) = 0 }
+}
+"""
+    assert [(f.namespace, f.name) for f in functions_in_source(source, "O.scala")] == [
+        ("p.O.given_Ordering_Int", "compare"),
+        ("p.O.named", "compare"),
+        ("p.O.given_Map_String_List", "size"),
+        ("p.O.given_Ordering_Short", "compare"),
+    ]
+
+
 def test_keywords_in_comments_and_strings_are_not_decisions():
     source = '''
     object Sample {

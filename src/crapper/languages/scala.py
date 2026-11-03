@@ -4,8 +4,9 @@ A `def` with a body is one entry. An abstract def, a secondary constructor,
 and a def inside a lambda or an anonymous class are not. A lambda or a local
 def counts toward the enclosing method, as in Python; an anonymous class body
 does not, as in Java. The namespace is the package and the enclosing types,
-`pkg.Outer.Inner`, so uml-viewer can attach scores to that class. A top level
-def belongs to its package.
+`pkg.Outer.Inner`, so uml-viewer can attach scores to that class. A given with
+a body is a class too: a named given adds its name, an anonymous one the name
+scalac gives it, `given_Ordering_Int`. A top level def belongs to its package.
 """
 
 from crapper.languages.treesitter import (
@@ -67,11 +68,38 @@ def _package(data: bytes, root) -> list[str]:
     return names
 
 
-def _name_node(node):
+def _outer_type_name(data: bytes, node) -> str:
+    """`Ordering` for `Ordering`, `p.Ordering` and `Ordering[Int]`."""
+
+    if node.type == "generic_type":
+        return _outer_type_name(data, node.child_by_field_name("type"))
+    if node.type == "stable_type_identifier":
+        return node_text(data, node.named_children[-1])
+    return node_text(data, node)
+
+
+def _given_name(data: bytes, node) -> str:
+    """The name scalac gives an anonymous given: `given_Ordering_Int` for `Ordering[Int]`.
+
+    Each type argument contributes its outer name alone, so `Map[String, List[Int]]`
+    gives `given_Map_String_List`.
+    """
+
+    given_type = node.child_by_field_name("return_type")
+    parts = [given_type]
+    if given_type.type == "generic_type":
+        parts += given_type.child_by_field_name("type_arguments").named_children
+    return "_".join(["given"] + [_outer_type_name(data, part) for part in parts])
+
+
+def _name_node(data: bytes, node):
     if node.type in _TYPES:
         return child_of_type(node, "identifier")
     if node.type == "package_clause":
         return child_of_type(node, "package_identifier")
+    if node.type == "given_definition" and child_of_type(node, "with_template_body") is not None:
+        ident = child_of_type(node, "identifier")
+        return _given_name(data, node) if ident is None else ident
     return None
 
 
@@ -101,7 +129,7 @@ def _function(data: bytes, node, package: list[str], path: str) -> Function | No
         return None
     return Function(
         name=name,
-        namespace=".".join(package + ancestor_names(data, node, _name_node)),
+        namespace=".".join(package + ancestor_names(data, node, lambda n: _name_node(data, n))),
         complexity=complexity(
             node,
             lambda n: n.type in _DECISIONS or _is_logic(data, n) or _is_single_catch_case(n),

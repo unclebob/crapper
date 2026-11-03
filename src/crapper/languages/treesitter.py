@@ -96,14 +96,17 @@ def enclosed_by(node, types) -> bool:
 def ancestor_names(data: bytes, node, name_node) -> list[str]:
     """Names of the ancestors `name_node` recognises, outermost first.
 
-    `name_node(ancestor)` returns the node holding the name, or None.
+    `name_node(ancestor)` returns the node holding the name, the name itself when no
+    node holds it, or None.
     """
 
     names: list[str] = []
     current = node.parent
     while current is not None:
         ident = name_node(current)
-        if ident is not None:
+        if isinstance(ident, str):
+            names.append(ident)
+        elif ident is not None:
             names.append(node_text(data, ident))
         current = current.parent
     names.reverse()
