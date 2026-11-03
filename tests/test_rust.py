@@ -99,3 +99,15 @@ def test_nested_module_path(tmp_path):
     assert [(fn.namespace, fn.name, fn.complexity) for fn in functions] == [
         ("demo::game::board", "place", 2)
     ]
+
+
+def test_inline_modules_extend_the_namespace(tmp_path):
+    (tmp_path / "Cargo.toml").write_text(
+        '[package]\nname = "demo"\nversion = "0.1.0"\n',
+        encoding="utf-8",
+    )
+    source = "mod outer {\n    pub mod inner {\n        pub fn f() {}\n    }\n}\n"
+    functions = functions_in_source(source, "src/lib.rs", str(tmp_path))
+    assert [(fn.namespace, fn.name) for fn in functions] == [
+        ("demo::outer::inner", "f")
+    ]
