@@ -13,6 +13,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from crapper.coverage import scoverage_paths
 from crapper.discover import is_test_file, language_of
 
 _MAVEN = [
@@ -571,6 +572,8 @@ def _cover_scala(root: Path, files: list[Path]) -> None:
         _warn("No build.sbt; skipping Scala coverage.")
         return
     for module in modules:
+        for report in scoverage_paths(module):
+            _clean_dir(report.parent)
         code = run_shell(_SBT, module)
         if code != 0:
             _warn(f"Scala coverage exited {code} in {module}. Scala coverage will score 0%.")

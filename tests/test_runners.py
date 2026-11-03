@@ -300,6 +300,18 @@ def test_missing_build_files_skip_that_language(tmp_path, monkeypatch):
     run_coverage(tmp_path, files, None)
 
 
+def test_a_failed_sbt_run_does_not_leave_the_previous_scoverage_report(tmp_path, monkeypatch):
+    monkeypatch.setattr("crapper.runners.run_shell", lambda command, cwd: 1)
+    _write(tmp_path, "build.sbt", 'name := "demo"\n')
+    source = _write(tmp_path, "src/main/scala/Board.scala", "object Board { def place = 1 }\n")
+    stale = [
+        _write(tmp_path, "target/scala-3.3.1/scoverage-report/scoverage.xml", "<scoverage/>\n"),
+        _write(tmp_path, "modules/core/target/scala-3.3.1/scoverage-report/scoverage.xml", "<scoverage/>\n"),
+    ]
+    run_coverage(tmp_path, [source], None)
+    assert [path for path in stale if path.exists()] == []
+
+
 def test_run_shell_returns_the_child_status_and_reports_a_failed_start(tmp_path, monkeypatch, capsys):
     assert run_shell("exit 3", tmp_path) == 3
 

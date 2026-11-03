@@ -564,7 +564,7 @@ def _merge_jacoco(root: Path) -> dict[str, list[JacocoMethod]]:
     return merged
 
 
-def _scoverage_paths(root: Path) -> list[Path]:
+def scoverage_paths(root: Path) -> list[Path]:
     """sbt-scoverage writes one report per module, under that module's target."""
 
     pattern = "target/scala-*/scoverage-report/scoverage.xml"
@@ -576,7 +576,7 @@ def _scoverage_paths(root: Path) -> list[Path]:
 
 def _merge_scoverage(root: Path) -> dict[str, FileCoverage]:
     merged: dict[str, FileCoverage] = {}
-    for text in _merge_texts(_scoverage_paths(root)):
+    for text in _merge_texts(scoverage_paths(root)):
         merged.update(parse_scoverage(text))
     return merged
 
