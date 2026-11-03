@@ -7,6 +7,7 @@ object Sample {
   def score(a: Boolean, b: Boolean, xs: List[Int]): Int = {
     for (x <- xs if x > 0) println(x)
     while (a) {}
+    do {} while (b)
     if (a && b || xs.nonEmpty) 1 else if (b) 2 else 0
     xs match {
       case Nil => 0
@@ -55,8 +56,8 @@ def _scored(source):
 
 
 def test_counts_each_decision_once():
-    # 1, for, its guard, while, if, &&, ||, else if, three cases, a case guard, a catch case.
-    assert _scored(SCORE) == [("score", 13)]
+    # 1, for, its guard, while, do while, if, &&, ||, else if, three cases, a case guard, a catch case.
+    assert _scored(SCORE) == [("score", 14)]
 
 
 def test_lambdas_and_local_defs_stay_inside_the_method_and_anonymous_classes_are_skipped():
