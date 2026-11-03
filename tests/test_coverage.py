@@ -169,7 +169,7 @@ SCOVERAGE = """<?xml version="1.0" encoding="UTF-8"?>
     <class name="Board" filename="src/main/scala/demo/Board.scala" statement-count="4" statements-invoked="1">
       <methods><method name="demo/Board/place" statement-count="4" statements-invoked="1" statement-rate="25.00" branch-rate="0.00">
         <statements>
-          <statement package="demo" class="Board" class-type="Object" full-class-name="demo.Board" source="/proj/src/main/scala/demo/Board.scala" method="place" start="10" end="20" line="4" branch="false" invocation-count="2" ignored="false"/>
+          <statement package="demo" class="Board" class-type="Object" full-class-name="demo.Board" source="/proj/src/main/scala/demo/Board.scala" method="place" start="10" end="20" line="4" branch="false" invocation-count="1" ignored="false"/>
           <statement package="demo" class="Board" class-type="Object" full-class-name="demo.Board" source="/proj/src/main/scala/demo/Board.scala" method="place" start="21" end="25" line="5" branch="true" invocation-count="0" ignored="false"/>
           <statement package="demo" class="Board" class-type="Object" full-class-name="demo.Board" source="/proj/src/main/scala/demo/Board.scala" method="place" start="26" end="30" line="5" branch="true" invocation-count="0" ignored="false"/>
           <statement package="demo" class="Board" class-type="Object" full-class-name="demo.Board" source="/proj/src/main/scala/demo/Board.scala" method="place" start="31" end="35" line="6" branch="false" invocation-count="0" ignored="true"/>
