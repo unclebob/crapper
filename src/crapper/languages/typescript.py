@@ -12,10 +12,12 @@ grammar and these same rules.
 """
 
 from crapper.languages.treesitter import (
+    ancestor_names,
     binary_logic,
     child_of_type,
     complexity,
     descendants,
+    enclosed_by,
     end_line,
     node_text,
     parse,
@@ -34,11 +36,8 @@ _DECISIONS = {
     "switch_case",
     "switch_default",
 }
-_SKIP = {
-    "class_declaration",
-    "abstract_class_declaration",
-    "interface_declaration",
-}
+_CLASSES = {"class_declaration", "abstract_class_declaration"}
+_SKIP = _CLASSES | {"interface_declaration"}
 _FUNCTION_TYPES = {
     "function_declaration",
     "method_definition",
@@ -116,26 +115,10 @@ def _module_namespace(path: str, source_root: str | None) -> str:
     return _strip_script_suffix(relative).replace("/", ".")
 
 
-def _inside_function(node) -> bool:
-    current = node.parent
-    while current is not None:
-        if current.type in _FUNCTION_TYPES:
-            return True
-        current = current.parent
-    return False
-
-
-def _class_names(data: bytes, node) -> list[str]:
-    names: list[str] = []
-    current = node.parent
-    while current is not None:
-        if current.type in {"class_declaration", "abstract_class_declaration"}:
-            ident = child_of_type(current, "type_identifier", "identifier")
-            if ident is not None:
-                names.append(node_text(data, ident))
-        current = current.parent
-    names.reverse()
-    return names
+def _class_name(node):
+    if node.type in _CLASSES:
+        return child_of_type(node, "type_identifier", "identifier")
+    return None
 
 
 def _has_body(node) -> bool:
@@ -268,7 +251,7 @@ def _append(found: list, node, **kwargs) -> None:
 
 
 def _append_function(found, data, node, module, path) -> None:
-    if _inside_function(node) or not _has_body(node):
+    if enclosed_by(node, _FUNCTION_TYPES) or not _has_body(node):
         return
     ident = child_of_type(node, "identifier")
     if ident is None:
@@ -290,7 +273,7 @@ def _append_method(found, data, node, module, path) -> None:
     if not _has_body(node):
         return
     ident = child_of_type(node, "property_identifier", "identifier")
-    classes = _class_names(data, node)
+    classes = ancestor_names(data, node, _class_name)
     if ident is None or not classes:
         return
     _append(
@@ -307,7 +290,7 @@ def _append_method(found, data, node, module, path) -> None:
 
 
 def _append_arrows(found, data, node, module, path) -> None:
-    if _inside_function(node):
+    if enclosed_by(node, _FUNCTION_TYPES):
         return
     for declarator in node.children:
         if declarator.type != "variable_declarator":

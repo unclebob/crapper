@@ -236,7 +236,7 @@ def test_coverage_commands_are_issued_per_language(tmp_path, monkeypatch):
             return 1
         if text.startswith("clj") or text.startswith("mvn") or text.startswith("go "):
             return 1
-        if "vitest" in text or text.startswith("cargo "):
+        if "vitest" in text or text.startswith("cargo ") or text.startswith("sbt "):
             return 1
         return 0
 
@@ -263,6 +263,8 @@ def test_coverage_commands_are_issued_per_language(tmp_path, monkeypatch):
     _write(tmp_path, "src/app.py", "def run():\n    return 1\n")
     _write(tmp_path, "Cargo.toml", '[package]\nname = "demo"\nversion = "0.1.0"\n')
     _write(tmp_path, "src/lib.rs", "pub fn open() {}\n")
+    _write(tmp_path, "build.sbt", 'name := "demo"\n')
+    _write(tmp_path, "src/main/scala/Board.scala", "object Board { def place = 1 }\n")
     files = [
         tmp_path / "src/demo/core.clj",
         tmp_path / "src/Board.java",
@@ -270,6 +272,7 @@ def test_coverage_commands_are_issued_per_language(tmp_path, monkeypatch):
         tmp_path / "src/ui.ts",
         tmp_path / "src/app.py",
         tmp_path / "src/lib.rs",
+        tmp_path / "src/main/scala/Board.scala",
     ]
     run_coverage(tmp_path, files, None)
     text = "\n".join(_as_text(command) for command in commands)
@@ -280,6 +283,7 @@ def test_coverage_commands_are_issued_per_language(tmp_path, monkeypatch):
     assert "vitest" in text
     assert "coverage run" in text
     assert "cargo llvm-cov" in text
+    assert "sbt coverage test coverageReport" in text
     run_coverage(tmp_path, files, "echo custom")
     assert commands[-1] == "echo custom"
 
@@ -291,8 +295,21 @@ def test_missing_build_files_skip_that_language(tmp_path, monkeypatch):
         _write(tmp_path, "main.go", "package main\n"),
         _write(tmp_path, "src/app.ts", "export const n = 1\n"),
         _write(tmp_path, "src/lib.rs", "pub fn open() {}\n"),
+        _write(tmp_path, "src/main/scala/App.scala", "object App\n"),
     ]
     run_coverage(tmp_path, files, None)
+
+
+def test_a_failed_sbt_run_does_not_leave_the_previous_scoverage_report(tmp_path, monkeypatch):
+    monkeypatch.setattr("crapper.runners.run_shell", lambda command, cwd: 1)
+    _write(tmp_path, "build.sbt", 'name := "demo"\n')
+    source = _write(tmp_path, "src/main/scala/Board.scala", "object Board { def place = 1 }\n")
+    stale = [
+        _write(tmp_path, "target/scala-3.3.1/scoverage-report/scoverage.xml", "<scoverage/>\n"),
+        _write(tmp_path, "modules/core/target/scala-3.3.1/scoverage-report/scoverage.xml", "<scoverage/>\n"),
+    ]
+    run_coverage(tmp_path, [source], None)
+    assert [path for path in stale if path.exists()] == []
 
 
 def test_run_shell_returns_the_child_status_and_reports_a_failed_start(tmp_path, monkeypatch, capsys):
@@ -443,6 +460,30 @@ def test_rust_kind_none_skips_rust_coverage(tmp_path, monkeypatch, capsys):
     _write(tmp_path, "Cargo.toml", '[package]\nname = "demo"\nversion = "0.1.0"\n')
     run_coverage(tmp_path, [source], None)
     assert "cargo" not in capsys.readouterr().err
+
+
+def test_scala_runs_sbt_in_the_build_directory_and_reports_a_failure(tmp_path, monkeypatch, capsys):
+    calls: list[tuple[list[str], Path]] = []
+
+    def shell(command, cwd):
+        calls.append((command, cwd))
+        return 3
+
+    monkeypatch.setattr("crapper.runners.run_shell", shell)
+    module = tmp_path / "game"
+    _write(module, "build.sbt", 'name := "game"\n')
+    source = _write(module, "src/main/scala/Board.scala", "object Board { def place = 1 }\n")
+    run_coverage(tmp_path, [source], None)
+    assert calls == [(["sbt", "coverage", "test", "coverageReport"], module.resolve())]
+    err = capsys.readouterr().err
+    assert f"Scala coverage exited 3 in {module.resolve()}. Scala coverage will score 0%." in err
+
+
+def test_scala_without_build_sbt_is_skipped(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr("crapper.runners.run_shell", lambda *_args: 0)
+    source = _write(tmp_path, "src/main/scala/App.scala", "object App\n")
+    run_coverage(tmp_path, [source], None)
+    assert "No build.sbt; skipping Scala coverage." in capsys.readouterr().err
 
 
 def test_tarpaulin_command_and_kind(monkeypatch):

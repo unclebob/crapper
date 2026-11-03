@@ -1,7 +1,8 @@
-"""Load Cloverage, LCOV, JaCoCo, and Go coverage profiles.
+"""Load Cloverage, LCOV, JaCoCo, scoverage, and Go coverage profiles.
 
 Clojure prefers Cloverage's per-line form counts, then LCOV. Java uses JaCoCo
-instruction counters. Go uses statement profiles. LCOV scores a function by
+instruction counters. Go uses statement profiles. Scala uses scoverage's
+statements, read into the same per line records LCOV fills. LCOV scores a function by
 its BRDA branch records when it has any, and by line hits otherwise.
 `percent_for` returns None when the file is absent; analysis turns that into 0%.
 """
@@ -418,6 +419,26 @@ def parse_jacoco_index(text: str) -> dict[str, list[JacocoMethod]]:
     return found
 
 
+def parse_scoverage(text: str) -> dict[str, FileCoverage]:
+    """Statements per line, keyed by the absolute source path scoverage writes.
+
+    A statement is covered when its invocation count is positive. An ignored
+    statement is left out, as scoverage leaves it out of its own rates.
+    """
+
+    root = ET.fromstring(_DOCTYPE.sub("", text))
+    out: dict[str, FileCoverage] = {}
+    for statement in root.iter("statement"):
+        if statement.get("ignored") == "true":
+            continue
+        record = out.setdefault(statement.get("source", ""), FileCoverage())
+        line = int(statement.get("line") or "0")
+        covered, total = record.get(line, (0, 0))
+        hit = 1 if int(statement.get("invocation-count") or "0") > 0 else 0
+        record[line] = (covered + hit, total + 1)
+    return out
+
+
 @dataclass
 class CoverageBundle:
     lcov: dict[str, dict[int, tuple[int, int]]] = field(default_factory=dict)
@@ -543,6 +564,23 @@ def _merge_jacoco(root: Path) -> dict[str, list[JacocoMethod]]:
     return merged
 
 
+def scoverage_paths(root: Path) -> list[Path]:
+    """sbt-scoverage writes one report per module, under that module's target."""
+
+    pattern = "target/scala-*/scoverage-report/scoverage.xml"
+    paths = list(root.glob(pattern))
+    paths.extend(root.glob(f"*/{pattern}"))
+    paths.extend(root.glob(f"*/*/{pattern}"))
+    return paths
+
+
+def _merge_scoverage(root: Path) -> dict[str, FileCoverage]:
+    merged: dict[str, FileCoverage] = {}
+    for text in _merge_texts(scoverage_paths(root)):
+        merged.update(parse_scoverage(text))
+    return merged
+
+
 def _merge_forms(root: Path) -> dict[str, dict[int, tuple[int, int]]]:
     coverage_dir = root / "target" / "coverage"
     found: dict[str, dict[int, tuple[int, int]]] = {}
@@ -561,8 +599,12 @@ def _merge_forms(root: Path) -> dict[str, dict[int, tuple[int, int]]]:
 def load_bundle(root: Path) -> CoverageBundle:
     go_profile = _merge_go(root)
     jacoco = _merge_jacoco(root)
+    # scoverage statements are per line records like LCOV's, so they score
+    # a function the same way: by its line range.
+    lines = _merge_lcov(root)
+    lines.update(_merge_scoverage(root))
     return CoverageBundle(
-        lcov=_merge_lcov(root),
+        lcov=lines,
         go_profile=go_profile or None,
         jacoco=jacoco or None,
         form_html=_merge_forms(root),

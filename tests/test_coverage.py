@@ -1,3 +1,5 @@
+import pytest
+
 from crapper.coverage import (
     CoverageBundle,
     go_percent,
@@ -6,6 +8,7 @@ from crapper.coverage import (
     parse_go_profile,
     parse_jacoco_index,
     parse_lcov,
+    parse_scoverage,
 )
 from crapper.model import Function
 
@@ -158,3 +161,53 @@ def test_load_bundle_merges_each_report(tmp_path):
     assert bundle.percent_for(function(start_line=3, end_line=4)) == 50.0
     assert bundle.go_profile is not None
     assert bundle.jacoco is not None
+
+
+SCOVERAGE = """<?xml version="1.0" encoding="UTF-8"?>
+<scoverage statement-count="4" statements-invoked="1" statement-rate="25.00" branch-rate="0.00" version="1.0" timestamp="1">
+  <packages><package name="demo"><classes>
+    <class name="Board" filename="src/main/scala/demo/Board.scala" statement-count="4" statements-invoked="1">
+      <methods><method name="demo/Board/place" statement-count="4" statements-invoked="1" statement-rate="25.00" branch-rate="0.00">
+        <statements>
+          <statement package="demo" class="Board" class-type="Object" full-class-name="demo.Board" source="/proj/src/main/scala/demo/Board.scala" method="place" start="10" end="20" line="4" branch="false" invocation-count="1" ignored="false"/>
+          <statement package="demo" class="Board" class-type="Object" full-class-name="demo.Board" source="/proj/src/main/scala/demo/Board.scala" method="place" start="21" end="25" line="5" branch="true" invocation-count="0" ignored="false"/>
+          <statement package="demo" class="Board" class-type="Object" full-class-name="demo.Board" source="/proj/src/main/scala/demo/Board.scala" method="place" start="26" end="30" line="5" branch="true" invocation-count="0" ignored="false"/>
+          <statement package="demo" class="Board" class-type="Object" full-class-name="demo.Board" source="/proj/src/main/scala/demo/Board.scala" method="place" start="31" end="35" line="6" branch="false" invocation-count="0" ignored="true"/>
+        </statements>
+      </method></methods>
+    </class>
+  </classes></package></packages>
+</scoverage>
+"""
+
+
+def test_scoverage_statements_become_line_records_and_ignored_ones_are_dropped():
+    parsed = parse_scoverage(SCOVERAGE)
+    assert parsed == {"/proj/src/main/scala/demo/Board.scala": {4: (1, 1), 5: (0, 2)}}
+    bundle = CoverageBundle(lcov=parsed)
+    scala = function(
+        language="scala",
+        path="src/main/scala/demo/Board.scala",
+        namespace="demo.Board",
+        name="place",
+        start_line=4,
+        end_line=6,
+    )
+    assert bundle.percent_for(scala) == pytest.approx(100.0 / 3)
+    assert bundle.percent_for(function(language="scala", path="src/main/scala/demo/Other.scala")) is None
+
+
+def test_load_bundle_reads_each_sbt_module_report(tmp_path):
+    modules = {"": "Root", "app/": "App", "modules/core/": "Board"}
+    for module, name in modules.items():
+        report = tmp_path / module / "target" / "scala-3.8.4" / "scoverage-report" / "scoverage.xml"
+        report.parent.mkdir(parents=True)
+        source = f"{tmp_path}/{module}src/main/scala/demo/{name}"
+        text = SCOVERAGE.replace("/proj/src/main/scala/demo/Board", source)
+        report.write_text(text, encoding="utf-8")
+    bundle = load_bundle(tmp_path)
+    for module, name in modules.items():
+        scala = function(
+            language="scala", path=f"{module}src/main/scala/demo/{name}.scala", start_line=4, end_line=5
+        )
+        assert bundle.percent_for(scala) == pytest.approx(100.0 / 3), module

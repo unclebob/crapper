@@ -13,6 +13,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from crapper.coverage import scoverage_paths
 from crapper.discover import is_test_file, language_of
 
 _MAVEN = [
@@ -562,6 +563,22 @@ def _cover_rust(root: Path, files: list[Path]) -> None:
             _warn(f"Rust coverage exited {code} in {module}. Rust coverage will score 0%.")
 
 
+_SBT = ["sbt", "coverage", "test", "coverageReport"]
+
+
+def _cover_scala(root: Path, files: list[Path]) -> None:
+    modules = _modules_with(files, ".scala", "build.sbt", root)
+    if not modules:
+        _warn("No build.sbt; skipping Scala coverage.")
+        return
+    for module in modules:
+        for report in scoverage_paths(module):
+            _clean_dir(report.parent)
+        code = run_shell(_SBT, module)
+        if code != 0:
+            _warn(f"Scala coverage exited {code} in {module}. Scala coverage will score 0%.")
+
+
 def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
     """Generate coverage reports for the languages present in `files`.
 
@@ -581,16 +598,19 @@ def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
         return code
 
     languages = _languages_in(files)
-    if "clojure" in languages:
-        _cover_clojure(root)
-    if "java" in languages:
-        _cover_java(root, files)
-    if "go" in languages:
-        _cover_go(root, files)
-    if "typescript" in languages:
-        _cover_typescript(root, files)
-    if "python" in languages:
-        _cover_python(root, files)
-    if "rust" in languages:
-        _cover_rust(root, files)
+    for language, cover in _RUNNERS.items():
+        if language in languages:
+            cover(root, files)
     return 0
+
+
+# In the order the languages were added, which is the order their reports are written.
+_RUNNERS = {
+    "clojure": lambda root, files: _cover_clojure(root),
+    "java": _cover_java,
+    "go": _cover_go,
+    "typescript": _cover_typescript,
+    "python": _cover_python,
+    "rust": _cover_rust,
+    "scala": _cover_scala,
+}

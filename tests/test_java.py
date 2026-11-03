@@ -101,6 +101,20 @@ def test_anonymous_class_methods_are_not_entries_and_do_not_raise_complexity():
     assert [(method.name, method.complexity) for method in methods] == [("outer", 1)]
 
 
+def test_anonymous_class_methods_inside_a_constructor_are_not_entries():
+    source = """
+    package p;
+    class B {
+        B() {
+            Runnable r = new Runnable() {
+                public void run() { if (x) {} }
+            };
+        }
+    }
+    """
+    assert functions_in_source(source, "src/p/B.java") == []
+
+
 def test_ignores_constructors_and_names_the_class_for_uml_viewer():
     source = """
     package demo.pkg;
