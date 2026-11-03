@@ -131,3 +131,7 @@ def test_operator_defs_are_entries_named_by_their_symbol():
 
 def test_a_def_whose_name_is_missing_is_not_an_entry():
     assert _scored("object O {\n  def = 1\n}\n") == []
+
+
+def test_a_def_with_only_type_parameters_or_a_type_is_not_an_entry():
+    assert _scored("object O {\n  def [T] = 1\n  def : Int = 1\n}\n") == []

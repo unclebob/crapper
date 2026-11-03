@@ -90,10 +90,11 @@ def _last_token(node):
 
 
 def _function(data: bytes, node, package: list[str], path: str) -> Function | None:
-    # The name comes first, before the parameters and the body, and is a plain or an
-    # operator identifier. A def with no name parses with a missing one.
-    ident = child_of_type(node, "identifier", "operator_identifier")
-    if ident.is_missing:
+    # The name follows the `def` keyword and is a plain or an operator identifier. A
+    # def with no name parses with a missing or broken identifier there, or with
+    # something else there and a later identifier, such as the return type.
+    ident = child_of_type(node, "def").next_sibling
+    if ident.type not in {"identifier", "operator_identifier"} or ident.has_error:
         return None
     name = node_text(data, ident)
     if name == "this":
