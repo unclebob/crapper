@@ -160,3 +160,8 @@ def test_a_def_with_only_type_parameters_or_a_type_is_not_an_entry():
 def test_a_def_in_a_lambda_outside_any_method_is_not_an_entry():
     source = "object O {\n  val h = (x: Int) => { def inner = 1; inner }\n}\n"
     assert _scored(source) == []
+
+
+def test_an_infix_with_an_alphanumeric_operator_is_not_a_decision():
+    source = "object O {\n  def span(a: Int, b: Int) = (1 to (a max b)).sum\n}\n"
+    assert _scored(source) == [("span", 1)]
