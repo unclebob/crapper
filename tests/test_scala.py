@@ -166,3 +166,9 @@ def test_a_def_in_a_lambda_outside_any_method_is_not_an_entry():
 def test_an_infix_with_an_alphanumeric_operator_is_not_a_decision():
     source = "object O {\n  def span(a: Int, b: Int) = (1 to (a max b)).sum\n}\n"
     assert _scored(source) == [("span", 1)]
+
+
+def test_each_case_of_a_partial_function_literal_is_a_decision():
+    # 1, one case, its guard, the wildcard case.
+    source = "object O {\n  def pick(xs: List[Option[Int]]) = xs.collect { case Some(x) if x > 0 => x; case _ => 0 }\n}\n"
+    assert _scored(source) == [("pick", 4)]
