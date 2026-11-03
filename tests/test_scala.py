@@ -103,6 +103,23 @@ def test_keywords_in_comments_and_strings_are_not_decisions():
     assert _scored(source) == [("stable", 1)]
 
 
+def _ranges(source):
+    return [(f.name, f.start_line, f.end_line) for f in functions_in_source(source, "O.scala")]
+
+
+def test_a_def_ends_on_its_last_body_line_not_in_the_next_lines_indentation():
+    indented = "object O:\n  def w =\n    while i < 3 do i += 1\n  def m = 1\n"
+    assert _ranges(indented) == [("w", 2, 3), ("m", 4, 4)]
+    braced = "object O {\n  def w = {\n    1\n  }\n  def m = 1\n}\n"
+    assert _ranges(braced) == [("w", 2, 4), ("m", 5, 5)]
+    commented = "object O:\n  def w =\n    1 // note\n  // about m\n  /* and\n  more */\n  def m = 1\n"
+    assert _ranges(commented) == [("w", 2, 3), ("m", 7, 7)]
+    marked = "object O:\n  def w =\n    1\n  end w\n  def m = 1\n"
+    assert _ranges(marked) == [("w", 2, 4), ("m", 5, 5)]
+    top_level = "def w =\n  1\n\ndef m = 1\n"
+    assert _ranges(top_level) == [("w", 1, 2), ("m", 4, 4)]
+
+
 def test_operator_defs_are_entries_named_by_their_symbol():
     source = "object O {\n  def ++(o: O): O = o\n  def :=(v: Int) = v\n  def unary_! : Int = 1\n}\n"
     assert _scored(source) == [("++", 1), (":=", 1), ("unary_!", 1)]

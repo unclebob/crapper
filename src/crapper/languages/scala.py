@@ -36,6 +36,7 @@ _DECISIONS = {
     "case_clause",
 }
 _EXECUTABLE = {"function_definition", "lambda_expression", "instance_expression"}
+_COMMENTS = {"comment", "block_comment"}
 
 
 def _is_logic(data: bytes, node) -> bool:
@@ -69,6 +70,20 @@ def _name_node(node):
     return None
 
 
+def _last_token(node):
+    """The last token of node that is not a comment.
+
+    An indented body runs on through the comments and the indentation that
+    follow it, up to the next definition, so the def ends where this token does.
+    """
+
+    while True:
+        children = [c for c in node.children if c.type not in _COMMENTS]
+        if not children:
+            return node
+        node = children[-1]
+
+
 def _function(data: bytes, node, package: list[str], path: str) -> Function | None:
     # The name comes first, before the parameters and the body, and is a plain or an
     # operator identifier. A def with no name parses with a missing one.
@@ -83,7 +98,7 @@ def _function(data: bytes, node, package: list[str], path: str) -> Function | No
         namespace=".".join(package + ancestor_names(data, node, _name_node)),
         complexity=complexity(node, lambda n: n.type in _DECISIONS or _is_logic(data, n), _skip),
         start_line=start_line(node),
-        end_line=end_line(node),
+        end_line=end_line(_last_token(node)),
         path=path,
         language="scala",
     )
