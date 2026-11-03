@@ -25,6 +25,7 @@ object Sample {
     val f = (y: Int) => if (y > 0) y else 0
     def local(z: Int) = if (z > 0) 1 else 0
     val r = new Runnable { def run(): Unit = if (a) () }
+    class L(x: Int = if (a) 1 else 2) extends Base(if (a) 3 else 4)
     xs.map(x => if (x > 0) x else 0).sum
   }
 }
@@ -60,7 +61,7 @@ def test_counts_each_decision_once():
     assert _scored(SCORE) == [("score", 14)]
 
 
-def test_lambdas_and_local_defs_stay_inside_the_method_and_anonymous_classes_are_skipped():
+def test_lambdas_and_local_defs_stay_inside_the_method_and_anonymous_and_local_classes_are_skipped():
     assert _scored(NESTED) == [("outer", 4)]
 
 
