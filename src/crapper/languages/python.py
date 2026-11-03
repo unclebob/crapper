@@ -8,6 +8,7 @@ enclosing function. A class method's namespace is `module.Class`.
 """
 
 from crapper.languages.treesitter import (
+    ancestor_names,
     child_of_type,
     complexity,
     descendants,
@@ -89,17 +90,8 @@ def _is_nested_function(node) -> bool:
     return False
 
 
-def _class_names(data: bytes, node) -> list[str]:
-    names: list[str] = []
-    current = node.parent
-    while current is not None:
-        if current.type == "class_definition":
-            ident = child_of_type(current, "identifier")
-            if ident is not None:
-                names.append(node_text(data, ident))
-        current = current.parent
-    names.reverse()
-    return names
+def _class_name(node):
+    return child_of_type(node, "identifier") if node.type == "class_definition" else None
 
 
 def functions_in_source(
@@ -114,7 +106,7 @@ def functions_in_source(
         ident = child_of_type(node, "identifier")
         if ident is None:
             continue
-        classes = _class_names(data, node)
+        classes = ancestor_names(data, node, _class_name)
         if classes:
             namespace = ".".join([module, *classes]) if module else ".".join(classes)
         else:

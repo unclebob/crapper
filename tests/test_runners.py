@@ -236,7 +236,7 @@ def test_coverage_commands_are_issued_per_language(tmp_path, monkeypatch):
             return 1
         if text.startswith("clj") or text.startswith("mvn") or text.startswith("go "):
             return 1
-        if "vitest" in text or text.startswith("cargo "):
+        if "vitest" in text or text.startswith("cargo ") or text.startswith("sbt "):
             return 1
         return 0
 
@@ -263,6 +263,8 @@ def test_coverage_commands_are_issued_per_language(tmp_path, monkeypatch):
     _write(tmp_path, "src/app.py", "def run():\n    return 1\n")
     _write(tmp_path, "Cargo.toml", '[package]\nname = "demo"\nversion = "0.1.0"\n')
     _write(tmp_path, "src/lib.rs", "pub fn open() {}\n")
+    _write(tmp_path, "build.sbt", 'name := "demo"\n')
+    _write(tmp_path, "src/main/scala/Board.scala", "object Board { def place = 1 }\n")
     files = [
         tmp_path / "src/demo/core.clj",
         tmp_path / "src/Board.java",
@@ -270,6 +272,7 @@ def test_coverage_commands_are_issued_per_language(tmp_path, monkeypatch):
         tmp_path / "src/ui.ts",
         tmp_path / "src/app.py",
         tmp_path / "src/lib.rs",
+        tmp_path / "src/main/scala/Board.scala",
     ]
     run_coverage(tmp_path, files, None)
     text = "\n".join(_as_text(command) for command in commands)
@@ -280,6 +283,7 @@ def test_coverage_commands_are_issued_per_language(tmp_path, monkeypatch):
     assert "vitest" in text
     assert "coverage run" in text
     assert "cargo llvm-cov" in text
+    assert "sbt coverage test coverageReport" in text
     run_coverage(tmp_path, files, "echo custom")
     assert commands[-1] == "echo custom"
 
@@ -291,6 +295,7 @@ def test_missing_build_files_skip_that_language(tmp_path, monkeypatch):
         _write(tmp_path, "main.go", "package main\n"),
         _write(tmp_path, "src/app.ts", "export const n = 1\n"),
         _write(tmp_path, "src/lib.rs", "pub fn open() {}\n"),
+        _write(tmp_path, "src/main/scala/App.scala", "object App\n"),
     ]
     run_coverage(tmp_path, files, None)
 

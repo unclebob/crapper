@@ -9,9 +9,11 @@ so uml-viewer can attach scores to that class. JaCoCo's binary name
 import re
 
 from crapper.languages.treesitter import (
+    ancestor_names,
     binary_logic,
     child_of_type,
     complexity,
+    enclosed_by,
     end_line,
     node_text,
     parse,
@@ -47,17 +49,7 @@ def _skip(node) -> bool:
     return node.type in _NESTED_TYPES or node.type == "class_body"
 
 
-def _inside_executable(node) -> bool:
-    current = node.parent
-    while current is not None:
-        if current.type in {
-            "method_declaration",
-            "constructor_declaration",
-            "lambda_expression",
-        }:
-            return True
-        current = current.parent
-    return False
+_EXECUTABLE = {"method_declaration", "constructor_declaration", "lambda_expression"}
 
 
 def _package_name(source: str) -> str | None:
@@ -65,17 +57,8 @@ def _package_name(source: str) -> str | None:
     return match.group(1) if match else None
 
 
-def _type_chain(data: bytes, node) -> list[str]:
-    names: list[str] = []
-    current = node.parent
-    while current is not None:
-        if current.type in _NESTED_TYPES:
-            ident = child_of_type(current, "identifier")
-            if ident is not None:
-                names.append(node_text(data, ident))
-        current = current.parent
-    names.reverse()
-    return names
+def _type_name(node):
+    return child_of_type(node, "identifier") if node.type in _NESTED_TYPES else None
 
 
 def _qualify(package: str | None, names: list[str], nested: str) -> str:
@@ -95,10 +78,10 @@ def functions_in_source(
     stack = [tree.root_node]
     while stack:
         node = stack.pop()
-        if node.type == "method_declaration" and not _inside_executable(node):
+        if node.type == "method_declaration" and not enclosed_by(node, _EXECUTABLE):
             if child_of_type(node, "block") is not None:
                 ident = child_of_type(node, "identifier")
-                names = _type_chain(data, node)
+                names = ancestor_names(data, node, _type_name)
                 if ident is not None and names:
                     found.append(
                         Function(

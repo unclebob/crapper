@@ -80,3 +80,31 @@ def binary_logic(node) -> bool:
     return node.type == "binary_expression" and any(
         child.type in {"&&", "||"} for child in node.children
     )
+
+
+def enclosed_by(node, types) -> bool:
+    """True when an ancestor of `node` has one of `types`."""
+
+    current = node.parent
+    while current is not None:
+        if current.type in types:
+            return True
+        current = current.parent
+    return False
+
+
+def ancestor_names(data: bytes, node, name_node) -> list[str]:
+    """Names of the ancestors `name_node` recognises, outermost first.
+
+    `name_node(ancestor)` returns the node holding the name, or None.
+    """
+
+    names: list[str] = []
+    current = node.parent
+    while current is not None:
+        ident = name_node(current)
+        if ident is not None:
+            names.append(node_text(data, ident))
+        current = current.parent
+    names.reverse()
+    return names

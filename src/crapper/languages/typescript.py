@@ -16,6 +16,7 @@ from crapper.languages.treesitter import (
     child_of_type,
     complexity,
     descendants,
+    enclosed_by,
     end_line,
     node_text,
     parse,
@@ -114,15 +115,6 @@ def _module_namespace(path: str, source_root: str | None) -> str:
     relative = _strip_root_prefix(relative, source_root)
     relative = _strip_src_dir(relative)
     return _strip_script_suffix(relative).replace("/", ".")
-
-
-def _inside_function(node) -> bool:
-    current = node.parent
-    while current is not None:
-        if current.type in _FUNCTION_TYPES:
-            return True
-        current = current.parent
-    return False
 
 
 def _class_names(data: bytes, node) -> list[str]:
@@ -268,7 +260,7 @@ def _append(found: list, node, **kwargs) -> None:
 
 
 def _append_function(found, data, node, module, path) -> None:
-    if _inside_function(node) or not _has_body(node):
+    if enclosed_by(node, _FUNCTION_TYPES) or not _has_body(node):
         return
     ident = child_of_type(node, "identifier")
     if ident is None:
@@ -307,7 +299,7 @@ def _append_method(found, data, node, module, path) -> None:
 
 
 def _append_arrows(found, data, node, module, path) -> None:
-    if _inside_function(node):
+    if enclosed_by(node, _FUNCTION_TYPES):
         return
     for declarator in node.children:
         if declarator.type != "variable_declarator":

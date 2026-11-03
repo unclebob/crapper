@@ -12,6 +12,7 @@ from pathlib import Path
 
 from crapper.languages.treesitter import (
     absolute_path as _absolute,
+    ancestor_names,
     binary_logic,
     child_of_type,
     complexity,
@@ -47,21 +48,12 @@ def _has_block(node) -> bool:
     return child_of_type(node, "block") is not None
 
 
-def _ancestor_mods(data: bytes, node) -> list[str]:
-    names: list[str] = []
-    current = node.parent
-    while current is not None:
-        if current.type == "mod_item":
-            ident = child_of_type(current, "identifier")
-            if ident is not None:
-                names.append(node_text(data, ident))
-        current = current.parent
-    names.reverse()
-    return names
+def _mod_name(node):
+    return child_of_type(node, "identifier") if node.type == "mod_item" else None
 
 
 def _in_mod_named(data: bytes, node, name: str) -> bool:
-    return name in _ancestor_mods(data, node)
+    return name in ancestor_names(data, node, _mod_name)
 
 
 def _first_type_name(data: bytes, node) -> str | None:
@@ -166,7 +158,7 @@ def _record_function(data: bytes, node, modules: list[str], path: str) -> Functi
         return None
     return Function(
         name=node_text(data, ident),
-        namespace=_namespace(modules, _ancestor_mods(data, node), _impl_owner(data, node)),
+        namespace=_namespace(modules, ancestor_names(data, node, _mod_name), _impl_owner(data, node)),
         complexity=complexity(node, _is_decision, _skip),
         start_line=start_line(node),
         end_line=end_line(node),
