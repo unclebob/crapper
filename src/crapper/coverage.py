@@ -2,7 +2,7 @@
 
 Clojure prefers Cloverage's per-line form counts, then LCOV. Java uses JaCoCo
 instruction counters. Go uses statement profiles. Scala uses scoverage's
-statements, read into the same per-line records LCOV fills. LCOV scores a function by
+statements, read into the same per line records LCOV fills. LCOV scores a function by
 its BRDA branch records when it has any, and by line hits otherwise.
 `percent_for` returns None when the file is absent; analysis turns that into 0%.
 """
@@ -599,7 +599,7 @@ def _merge_forms(root: Path) -> dict[str, dict[int, tuple[int, int]]]:
 def load_bundle(root: Path) -> CoverageBundle:
     go_profile = _merge_go(root)
     jacoco = _merge_jacoco(root)
-    # scoverage statements are per-line records like LCOV's, so they score
+    # scoverage statements are per line records like LCOV's, so they score
     # a function the same way: by its line range.
     lines = _merge_lcov(root)
     lines.update(_merge_scoverage(root))
