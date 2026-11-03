@@ -132,3 +132,26 @@ app.get("/users", (req, res) => req.id ?? 0);
         ("choose", 7),
         ("GET /users", 2),
     ]
+
+
+def test_a_method_namespace_names_every_enclosing_class_outermost_first():
+    source = """
+export abstract class Shape {
+  area(): number {
+    class Unit {
+      size(): number { return 1; }
+    }
+    return new Unit().size();
+  }
+}
+const anonymous = class {
+  hidden(): number { return 0; }
+};
+"""
+    functions = functions_in_source(source, "src/demo/shape.ts", "/proj")
+    assert [(fn.namespace, fn.name) for fn in functions] == [
+        ("demo.shape.Shape", "area"),
+        ("demo.shape.Shape.Unit", "size"),
+    ]
+    js = functions_in_source("class Box {\n  open() { return 1; }\n}\n", "src/demo/box.js", "/proj")
+    assert [(fn.namespace, fn.name) for fn in js] == [("demo.box.Box", "open")]
