@@ -89,6 +89,10 @@ def test_chained_package_clauses_join_and_no_package_leaves_the_type_alone():
     assert [f.namespace for f in functions_in_source(bare, "O.scala")] == ["O", ""]
 
 
+def test_a_brace_less_catch_case_is_a_decision():
+    assert _scored("object O { def f = try 1 catch case e: E => 2 }\n") == [("f", 2)]
+
+
 def test_keywords_in_comments_and_strings_are_not_decisions():
     source = '''
     object Sample {

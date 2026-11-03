@@ -46,6 +46,11 @@ def _is_logic(data: bytes, node) -> bool:
     return operator is not None and node_text(data, operator) in {"&&", "||"}
 
 
+def _is_single_catch_case(node) -> bool:
+    # Scala 3 `catch case e: E => ...` holds its one case directly, with no case_clause.
+    return node.type == "catch_clause" and child_of_type(node, "case") is not None
+
+
 def _skip(node) -> bool:
     return node.type in _TYPES or node.type == "template_body"
 
@@ -96,7 +101,11 @@ def _function(data: bytes, node, package: list[str], path: str) -> Function | No
     return Function(
         name=name,
         namespace=".".join(package + ancestor_names(data, node, _name_node)),
-        complexity=complexity(node, lambda n: n.type in _DECISIONS or _is_logic(data, n), _skip),
+        complexity=complexity(
+            node,
+            lambda n: n.type in _DECISIONS or _is_logic(data, n) or _is_single_catch_case(n),
+            _skip,
+        ),
         start_line=start_line(node),
         end_line=end_line(_last_token(node)),
         path=path,
