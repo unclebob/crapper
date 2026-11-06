@@ -1,6 +1,6 @@
 # crapper
 
-CRAP scores for Clojure, Java, Go, TypeScript, Rust, and Python. One run detects the language of each source file, applies that language's complexity and coverage rules, and writes the snapshot [uml-viewer](https://github.com/unclebob/uml-viewer) already reads.
+CRAP scores for Clojure, Java, Go, TypeScript, Rust, Python, and Scala. One run detects the language of each source file, applies that language's complexity and coverage rules, and writes the snapshot [uml-viewer](https://github.com/unclebob/uml-viewer) already reads.
 
 The formula is the one from [crap4clj](https://github.com/unclebob/crap4clj), [crap4java](https://github.com/unclebob/crap4java), and [crap4go](https://github.com/unclebob/crap4go):
 
@@ -52,6 +52,7 @@ uml-viewer groups entries by `:namespace` and joins each operation on `:name`. `
 | TypeScript | the dotted module path, or `module.Class` | the function or method name |
 | Rust | `crate::module`, or `crate::module::Type` | the function or method name |
 | Python | the dotted module path, or `module.Class` | the function or method name |
+| Scala | `package.Type`, or `package.Outer.Inner` | the method name, or `outer.inner` for a local method |
 
 Rename or move is a new entry. There is no identity matching across runs.
 
@@ -69,6 +70,10 @@ Rust counts `if`, loops, each `match` arm, `?`, and `&&` / `||`. `mod tests` is 
 
 Python counts `if`, `elif`, `for`, `while`, `except`, each `match` case, a comprehension filter, a conditional expression, and each `and` / `or`. Nested functions stay inside the enclosing function. Coverage is LCOV from `coverage.py`, running pytest when the project uses it and `unittest` otherwise. `coverage` and `pytest` are installed into the project's interpreter when they are missing.
 
+Scala counts `if`, `while`, `do`/`while`, `for`, each `for` or `case` guard, each `case` clause (in a `match`, a partial function, or a `catch`), and each `&&` / `||`. Function literals stay inside the enclosing method; a method local to another is scored on its own as `outer.inner`. Secondary constructors (`def this`) and abstract methods are skipped, and `*Suite.scala`, `*Spec.scala`, `*Test.scala` and `*Tests.scala` are tests. Coverage is scoverage statement coverage: each statement counts for the innermost method whose span contains it.
+
+Scala is the first language written as a strategy (`src/crapper/strategies/`): one object holds its source and test rules, function extraction, coverage reading, and coverage run. Discovery, extraction, coverage lookup, and the runner ask the strategy registry before falling back to the built-in languages.
+
 ## Coverage commands
 
 By default a run deletes the previous report for each language it is about to measure and regenerates it:
@@ -81,6 +86,7 @@ By default a run deletes the previous report for each language it is about to me
 | TypeScript | `npm run coverage`, or Vitest `--coverage`, or `npx c8 ... npm test` | `coverage/lcov.info` or `target/coverage/typescript/lcov.info` |
 | Rust | `cargo llvm-cov` or `cargo tarpaulin`, per Cargo package | `target/coverage/rust/lcov.info` |
 | Python | `coverage run` with pytest or unittest, then `coverage lcov` | `target/coverage/python/lcov.info` |
+| Scala | Mill: `__.test`, then `__.scoverage.xmlReport` (needs the scoverage contrib module). sbt: `coverage; test; coverageReport` (`testFull` on sbt 2) | `out/**/scoverage.xml`, or `target/**/scoverage-report/scoverage.xml` |
 
 A missing tool or a failed test run scores that language at 0% and still writes the snapshot. Pass `--coverage-command` to replace those defaults with one command of your own. `--no-coverage` is the run that leaves coverage and CRAP as N/A.
 

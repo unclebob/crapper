@@ -593,4 +593,13 @@ def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
         _cover_python(root, files)
     if "rust" in languages:
         _cover_rust(root, files)
+    _cover_strategies(root, files, languages)
     return 0
+
+
+def _cover_strategies(root: Path, files: list[Path], languages: set[str]) -> None:
+    from crapper.strategies import STRATEGIES
+
+    for name, strategy in STRATEGIES.items():
+        if name in languages:
+            strategy.run_coverage(root, files)

@@ -67,16 +67,30 @@ JS_TEST_SUFFIXES = (
 
 
 def language_of(path: str | Path) -> str | None:
+    from crapper.strategies import BY_EXTENSION
+
     file_path = Path(path)
     name = file_path.name
     if name.endswith(".d.ts"):
         return None
+    strategy = BY_EXTENSION.get(file_path.suffix)
+    if strategy is not None:
+        return strategy.name
     return EXTENSIONS.get(file_path.suffix)
+
+
+def _strategy_test_file(file_path: Path) -> bool:
+    from crapper.strategies import BY_EXTENSION
+
+    strategy = BY_EXTENSION.get(file_path.suffix)
+    return strategy is not None and strategy.is_test_file(file_path)
 
 
 def is_test_file(path: str | Path) -> bool:
     file_path = Path(path)
     name = file_path.name
+    if _strategy_test_file(file_path):
+        return True
     if name.endswith(GO_TEST_SUFFIX):
         return True
     if name.endswith(CLOJURE_TEST_SUFFIXES):
