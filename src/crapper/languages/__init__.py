@@ -21,6 +21,11 @@ _READERS = {
 def functions_in_file(
     language: str, source: str, path: str, project_root: str
 ) -> list[Function]:
+    from crapper.strategies import strategy_for
+
+    strategy = strategy_for(language)
+    if strategy is not None:
+        return strategy.functions_in_source(source, path, project_root)
     reader = _READERS.get(language)
     if reader is None:
         return []

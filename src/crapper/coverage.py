@@ -425,6 +425,8 @@ class CoverageBundle:
     jacoco: dict[str, list[JacocoMethod]] | None = None
     form_html: dict[str, dict[int, tuple[int, int]]] = field(default_factory=dict)
     source_parts: list[tuple[str, ...]] = field(default_factory=list)
+    #: coverage read by each language strategy, keyed by language name
+    by_strategy: dict[str, object] = field(default_factory=dict)
 
     def bind_sources(self, paths: list[str]) -> None:
         """Remember project files so a short path cannot take a longer file's report."""
@@ -440,6 +442,16 @@ class CoverageBundle:
         self.source_parts = found
 
     def percent_for(self, function: Function) -> float | None:
+        from crapper.strategies import strategy_for
+
+        strategy = strategy_for(function.language)
+        if strategy is not None:
+            return strategy.percent_for(
+                self.by_strategy.get(strategy.name), function, self.source_parts
+            )
+        return self._builtin_percent(function)
+
+    def _builtin_percent(self, function: Function) -> float | None:
         if function.language == "java":
             names = []
             if function.jacoco_class:
@@ -559,11 +571,19 @@ def _merge_forms(root: Path) -> dict[str, dict[int, tuple[int, int]]]:
 
 
 def load_bundle(root: Path) -> CoverageBundle:
+    from crapper.strategies import STRATEGIES
+
     go_profile = _merge_go(root)
     jacoco = _merge_jacoco(root)
+    by_strategy = {}
+    for strategy in STRATEGIES.values():
+        loaded = strategy.load_coverage(root)
+        if loaded is not None:
+            by_strategy[strategy.name] = loaded
     return CoverageBundle(
         lcov=_merge_lcov(root),
         go_profile=go_profile or None,
         jacoco=jacoco or None,
         form_html=_merge_forms(root),
+        by_strategy=by_strategy,
     )
