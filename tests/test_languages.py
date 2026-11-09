@@ -10,6 +10,7 @@ _SOURCES = [
     ("python", "def run():\n    return 1\n", "src/app.py", "run"),
     ("rust", "pub fn open() {}\n", "src/lib.rs", "open"),
     ("fsharp", "module Demo\nlet run x = x\n", "src/Demo.fs", "run"),
+    ("kotlin", "package demo\nfun run() = 1\n", "src/Demo.kt", "run"),
 ]
 
 

@@ -234,6 +234,26 @@ def test_dotnet_test_projects_and_fsharp_build_output_are_not_scored(tmp_path):
     ]
 
 
+def test_kotlin_test_source_sets_build_output_and_gradle_scripts_are_not_scored(tmp_path):
+    files = {
+        "app/src/main/kotlin/demo/Board.kt": "package demo\nfun place() = 1\n",
+        "app/src/test/kotlin/demo/BoardTest.kt": "package demo\nfun t() = 1\n",
+        "app/src/androidTest/kotlin/demo/BoardUiTest.kt": "package demo\nfun u() = 1\n",
+        "shared/src/commonTest/kotlin/demo/SharedTest.kt": "package demo\nfun s() = 1\n",
+        "app/build/generated/demo/Gen.kt": "package demo\nfun g() = 1\n",
+        "app/build.gradle.kts": "plugins { id(\"kotlin\") }\n",
+        "app/src/androidTest/java/demo/Legacy.java": "class Legacy { void a() {} }\n",
+    }
+    for relative, text in files.items():
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    assert iter_source_files([tmp_path]) == [
+        (tmp_path / "app/src/androidTest/java/demo/Legacy.java").resolve(),
+        (tmp_path / "app/src/main/kotlin/demo/Board.kt").resolve(),
+    ]
+
+
 def test_missing_coverage_scores_zero_and_sorts_ahead_of_a_covered_function(tmp_path):
     low = tmp_path / "src" / "low.ts"
     high = tmp_path / "src" / "high.ts"

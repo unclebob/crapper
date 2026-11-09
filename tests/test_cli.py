@@ -36,6 +36,15 @@ def test_fsharp_sources_are_fsharp_and_signature_files_are_not_scored():
     assert language_of("src/Board.fsi") is None
 
 
+def test_kotlin_sources_are_kotlin_and_gradle_scripts_are_not_scored():
+    assert language_of("app/src/main/kotlin/Board.kt") == "kotlin"
+    assert language_of("app/build.gradle.kts") is None
+    assert is_test_file("app/src/androidTest/kotlin/BoardTest.kt") is True
+    assert is_test_file("shared/src/commonTest/kotlin/BoardTest.kt") is True
+    assert is_test_file("app/src/main/kotlin/Board.kt") is False
+    assert is_test_file("app/src/androidTest/java/BoardTest.java") is False
+
+
 def _write(root: Path, relative: str, source: str) -> None:
     path = root / relative
     path.parent.mkdir(parents=True, exist_ok=True)

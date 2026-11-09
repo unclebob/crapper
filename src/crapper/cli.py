@@ -16,6 +16,7 @@ from crapper.discover import (
     DOTNET_TEST_DIR_SUFFIXES,
     GO_TEST_SUFFIX,
     JS_TEST_SUFFIXES,
+    KOTLIN_TEST_SOURCE_SET_SUFFIX,
     SKIP_DIRS,
     TEST_DIRS,
     is_test_file,
@@ -49,7 +50,7 @@ and prints a report sorted worst first.
 
 Languages: Clojure (.clj .cljc .cljs .bb), Java (.java), Go (.go),
 TypeScript and JavaScript (.ts .tsx .mts .cts .js .jsx .mjs .cjs),
-Rust (.rs), Python (.py), F# (.fs .fsx).
+Rust (.rs), Python (.py), F# (.fs .fsx), Kotlin (.kt).
 
 Options:
   -h, --help                    Print this help and exit.
@@ -80,6 +81,8 @@ With no paths, source files under the project root are analyzed. Directories
 named {_SKIPPED_DIRS} are skipped, as are {_TEST_PATTERNS}.
 
 F# also skips .fsi files, bin, obj, and {_TEST_DIRS_DOTNET} folders.
+Kotlin also skips .kts files and src/*{KOTLIN_TEST_SOURCE_SET_SUFFIX} source sets
+such as src/androidTest.
 
 Coverage, when it is produced:
   Clojure      clj -M:cov --lcov, then Cloverage form counts or LCOV
@@ -98,6 +101,7 @@ uml-viewer joins .metrics/crap.edn on :namespace and :name.
   Rust         crate::module, or crate::module::Type for methods
   Python       dotted module path, or module.Class for methods
   F#           namespace and module path, or path.Type for members
+  Kotlin       the package, or package.Class for members
 """
 
 

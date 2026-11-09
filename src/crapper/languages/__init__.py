@@ -4,6 +4,7 @@ from crapper.languages.clojure import functions_in_source as clojure_functions
 from crapper.languages.fsharp import functions_in_source as fsharp_functions
 from crapper.languages.golang import functions_in_source as go_functions
 from crapper.languages.java import functions_in_source as java_functions
+from crapper.languages.kotlin import functions_in_source as kotlin_functions
 from crapper.languages.python import functions_in_source as python_functions
 from crapper.languages.rust import functions_in_source as rust_functions
 from crapper.languages.typescript import functions_in_source as typescript_functions
@@ -17,6 +18,7 @@ _READERS = {
     "python": python_functions,
     "rust": rust_functions,
     "fsharp": fsharp_functions,
+    "kotlin": kotlin_functions,
 }
 
 

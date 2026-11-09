@@ -22,6 +22,7 @@ EXTENSIONS = {
     ".py": "python",
     ".fs": "fsharp",
     ".fsx": "fsharp",
+    ".kt": "kotlin",
 }
 
 SKIP_DIRS = {
@@ -47,6 +48,7 @@ SKIP_DIRS = {
 TEST_DIRS = {"test", "tests", "spec", "specs", "__tests__"}
 DOTNET_TEST_DIR_SUFFIXES = (".Test", ".Tests")
 DOTNET_BUILD_DIRS = {"bin", "obj"}
+KOTLIN_TEST_SOURCE_SET_SUFFIX = "Test"
 
 GO_TEST_SUFFIX = "_test.go"
 CLOJURE_TEST_SUFFIXES = ("_test.clj", "_test.cljc", "_test.cljs", "_test.bb")
@@ -93,7 +95,7 @@ def is_test_file(path: str | Path) -> bool:
         return True
     if any(part in TEST_DIRS for part in file_path.parts):
         return True
-    return _in_dotnet_test_project(file_path)
+    return _in_dotnet_test_project(file_path) or _in_kotlin_test_source_set(file_path)
 
 
 def _fsharp_path_has(path: Path, matches) -> bool:
@@ -102,6 +104,18 @@ def _fsharp_path_has(path: Path, matches) -> bool:
 
 def _in_dotnet_test_project(path: Path) -> bool:
     return _fsharp_path_has(path, lambda part: part.endswith(DOTNET_TEST_DIR_SUFFIXES))
+
+
+def _in_kotlin_test_source_set(path: Path) -> bool:
+    """`src/androidTest`, `src/commonTest`, and other Gradle test source sets."""
+
+    if language_of(path) != "kotlin":
+        return False
+    parts = path.parts
+    return any(
+        parent == "src" and child.endswith(KOTLIN_TEST_SOURCE_SET_SUFFIX)
+        for parent, child in zip(parts, parts[1:])
+    )
 
 
 def _is_build_output(path: Path) -> bool:
