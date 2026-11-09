@@ -10,6 +10,7 @@ and by line hits otherwise.
 
 from __future__ import annotations
 
+import functools
 import re
 import sys
 import xml.etree.ElementTree as ET
@@ -518,9 +519,6 @@ class CoverageBundle:
     jacoco: dict[str, list[JacocoMethod]] | None = None
     form_html: dict[str, dict[int, tuple[int, int]]] = field(default_factory=dict)
     source_parts: list[tuple[str, ...]] = field(default_factory=list)
-    _jacoco_by_class: dict[str, list[tuple[str, JacocoMethod]]] | None = field(
-        default=None, init=False, repr=False
-    )
 
     def bind_sources(self, paths: list[str]) -> None:
         """Remember project files so a short path cannot take a longer file's report."""
@@ -537,7 +535,7 @@ class CoverageBundle:
 
     def percent_for(self, function: Function) -> float | None:
         if function.language == "kotlin" and function.jacoco_class:
-            return _kotlin_from_index(self._classes(), function.jacoco_class, function.name)
+            return _kotlin_from_index(self._jacoco_by_class, function.jacoco_class, function.name)
         if function.language == "java":
             names = []
             if function.jacoco_class:
@@ -566,10 +564,9 @@ class CoverageBundle:
             return branched
         return percent_for_range(record, function.start_line, function.end_line)
 
-    def _classes(self) -> dict[str, list[tuple[str, JacocoMethod]]]:
-        if self._jacoco_by_class is None:
-            self._jacoco_by_class = _by_class(self.jacoco or {})
-        return self._jacoco_by_class
+    @functools.cached_property
+    def _jacoco_by_class(self) -> dict[str, list[tuple[str, JacocoMethod]]]:
+        return _by_class(self.jacoco or {})
 
     def _html_lines(self, path: str) -> dict[int, tuple[int, int]] | None:
         return _lookup(self.form_html, path, self.source_parts)
@@ -636,13 +633,12 @@ def _merge_go(root: Path) -> dict[str, list[tuple[int, int, int, int]]]:
 
 
 def _merge_jacoco(root: Path) -> dict[str, list[JacocoMethod]]:
-    """JaCoCo's Maven reports and Kover's Gradle reports share one index."""
-
-    paths: list[Path] = []
-    for report in ("target/site/jacoco/jacoco.xml", "build/reports/kover/report.xml"):
-        paths.append(root / report)
-        paths.extend(root.glob(f"*/{report}"))
-        paths.extend(root.glob(f"*/*/{report}"))
+    paths = [root / "target" / "site" / "jacoco" / "jacoco.xml"]
+    paths.extend(root.glob("*/target/site/jacoco/jacoco.xml"))
+    paths.extend(root.glob("*/*/target/site/jacoco/jacoco.xml"))
+    paths.append(root / "build/reports/kover/report.xml")
+    paths.extend(root.glob("*/build/reports/kover/report.xml"))
+    paths.extend(root.glob("*/*/build/reports/kover/report.xml"))
     merged: dict[str, list[JacocoMethod]] = {}
     for text in _merge_texts(paths):
         for key, methods in parse_jacoco_index(text).items():

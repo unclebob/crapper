@@ -32,7 +32,7 @@ _JVM_NAME = re.compile(r'(?m)^\s*@file:JvmName\("([^"]+)"\)')
 # and loses the rest of the file.
 _TYPE_ANNOTATION = re.compile(r"@[A-Za-z_][\w.]*(?=[ \t]+\()", re.ASCII)
 _TYPES = {"class_declaration", "object_declaration", "companion_object"}
-_NESTING = {"function_declaration", "lambda_literal", "object_literal", "anonymous_function"}
+_NESTING = {"lambda_literal", "object_literal", "anonymous_function"}
 _DECISIONS = {
     "if_expression",
     "for_statement",
@@ -59,15 +59,6 @@ def _is_decision(node) -> bool:
 
 
 def _skip(_node) -> bool:
-    return False
-
-
-def _is_nested(node) -> bool:
-    current = node.parent
-    while current is not None:
-        if current.type in _NESTING:
-            return True
-        current = current.parent
     return False
 
 
@@ -157,8 +148,9 @@ def functions_in_source(
     while stack:
         node = stack.pop()
         if node.type == "function_declaration":
-            if not _is_nested(node):
-                reader.read(node)
+            reader.read(node)
+            continue
+        if node.type in _NESTING:
             continue
         stack.extend(reversed(node.children))
     return reader.found

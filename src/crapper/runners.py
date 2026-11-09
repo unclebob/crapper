@@ -627,7 +627,7 @@ def _cover_fsharp(root: Path) -> None:
 _GRADLE_SETTINGS = ("settings.gradle.kts", "settings.gradle")
 _GRADLE_BUILDS = ("build.gradle.kts", "build.gradle")
 _KOVER_NAMES = ("org.jetbrains.kotlinx.kover", "kotlinx.kover")
-_KOVER_REPORTS = (
+_KOVER_REPORTS = (  # must match the Kover globs coverage._merge_jacoco reads
     "build/reports/kover/report.xml",
     "*/build/reports/kover/report.xml",
     "*/*/build/reports/kover/report.xml",
