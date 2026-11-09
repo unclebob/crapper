@@ -1,6 +1,6 @@
 # crapper
 
-This is a fork of [unclebob/crapper](https://github.com/unclebob/crapper) that adds F# support. Thanks to Robert C. Martin for the original tool.
+This is a fork of [unclebob/crapper](https://github.com/unclebob/crapper) that adds F# and Kotlin support. Thanks to Robert C. Martin for the original tool.
 
 CRAP scores for Clojure, Java, Go, TypeScript, Rust, Python, F#, and Kotlin. One run detects the language of each source file, applies that language's complexity and coverage rules, and writes the snapshot [uml-viewer](https://github.com/unclebob/uml-viewer) already reads.
 
