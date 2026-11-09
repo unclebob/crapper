@@ -7,10 +7,11 @@ Entries are functions with a body that are not inside another function, a
 lambda, or an anonymous object; those stay in the enclosing entry.
 Constructors, `init` blocks, property accessors, and abstract functions are
 not entries. The namespace is the package plus the chain of classes, objects,
-and companions (`Companion` when unnamed), as Kotlin imports them; a
-top-level function's namespace is the package, or the file stem when there is
-no `package` line. The JVM class (`pkg.Outer$Inner`, or `pkg.FileKt` and
-`@file:JvmName` for top-level functions) is kept for coverage lookup.
+companions (`Companion` when unnamed), and enum values with their own body, as
+Kotlin imports them; a top-level function's namespace is the package, or the
+file stem when there is no `package` line. The JVM class (`pkg.Outer$Inner`,
+`pkg.Enum$VALUE`, or `pkg.FileKt` and `@file:JvmName` for top-level functions)
+is kept for coverage lookup.
 """
 
 import re
@@ -31,7 +32,7 @@ _JVM_NAME = re.compile(r'(?m)^\s*@file:JvmName\("([^"]+)"\)')
 # parenthesis. The grammar reads the parenthesis as the annotation's arguments
 # and loses the rest of the file.
 _TYPE_ANNOTATION = re.compile(r"@[A-Za-z_][\w.]*(?=[ \t]+\()", re.ASCII)
-_TYPES = {"class_declaration", "object_declaration", "companion_object"}
+_TYPES = {"class_declaration", "object_declaration", "companion_object", "enum_entry"}
 _NESTING = {"lambda_literal", "object_literal", "anonymous_function"}
 _DECISIONS = {
     "if_expression",
@@ -63,6 +64,10 @@ def _skip(_node) -> bool:
 
 
 def _type_name(data: bytes, node) -> str | None:
+    if node.type == "enum_entry":
+        if child_of_type(node, "class_body") is None:
+            return None
+        return node_text(data, child_of_type(node, "simple_identifier"))
     ident = child_of_type(node, "type_identifier")
     if ident is not None:
         return node_text(data, ident)

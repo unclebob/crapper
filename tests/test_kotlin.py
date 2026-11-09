@@ -79,6 +79,25 @@ def test_a_file_without_a_package_uses_the_file_stem():
     ]
 
 
+def test_an_enum_value_with_its_own_body_is_one_more_type_level():
+    source = """
+package demo
+
+enum class Shape {
+    CIRCLE { override fun area() = 3.14 },
+    SQUARE { override fun area(): Double { return 1.0 } },
+    PLAIN;
+
+    open fun area(): Double = 0.0
+}
+"""
+    assert entries(source) == [
+        ("demo.Shape.CIRCLE", "area", "demo.Shape$CIRCLE"),
+        ("demo.Shape.SQUARE", "area", "demo.Shape$SQUARE"),
+        ("demo.Shape", "area", "demo.Shape"),
+    ]
+
+
 def test_nested_functions_constructors_accessors_and_abstract_functions_are_not_entries():
     source = """
 package demo
