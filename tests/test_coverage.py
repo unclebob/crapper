@@ -286,3 +286,125 @@ def test_a_cobertura_report_with_a_non_numeric_line_attribute_is_skipped_with_a_
     _write_cobertura(tmp_path, "Board.Tests", _cobertura(source, [(3, 1, None)]))
     assert _fsharp_percent(tmp_path, 3, 3) == 100.0
     assert "unreadable Cobertura report" in capsys.readouterr().err
+
+
+def _kover(classes):
+    """A Kover XML report: `classes` maps `pkg/Class` to (method, missed, covered) rows, no lines."""
+
+    body = "".join(
+        f'<class name="{name}" sourcefilename="Board.kt">'
+        + "".join(
+            f'<method name="{method}" desc="()V">'
+            f'<counter type="INSTRUCTION" missed="{missed}" covered="{covered}"/></method>'
+            for method, missed, covered in methods
+        )
+        + "</class>"
+        for name, methods in classes.items()
+    )
+    return f'<?xml version="1.0" ?><report name="Kover"><package name="demo">{body}</package></report>'
+
+
+def _write_kover(root, folder, classes):
+    report = root / folder / "build" / "reports" / "kover" / "report.xml"
+    report.parent.mkdir(parents=True, exist_ok=True)
+    report.write_text(_kover(classes), encoding="utf-8")
+
+
+def _kotlin_scores(root, source, path="app/src/main/kotlin/demo/Board.kt"):
+    file = root / path
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_text(source, encoding="utf-8")
+    found = analyze_files([file], root, load_bundle(root))
+    return [(entry.namespace, entry.name, entry.coverage) for entry in found]
+
+
+_BOARD_KT = """package demo
+
+fun place(x: Int): Int {
+    return x
+}
+
+class Board {
+    fun tick(): Int {
+        return 1
+    }
+
+    fun show(a: Int) {
+    }
+
+    fun show(a: String) {
+    }
+
+    fun clear() {
+    }
+}
+"""
+
+
+def test_a_kotlin_function_sums_every_report_method_named_after_it_in_its_jvm_class(tmp_path):
+    _write_kover(
+        tmp_path,
+        ".",
+        {
+            "demo/BoardKt": [("place", 1, 3)],
+            "demo/Board": [
+                ("tick-Xk2a9", 4, 0),
+                ("tick$lambda$0", 0, 2),
+                ("tick$default", 0, 2),
+                ("ticker", 0, 100),
+                ("show", 1, 1),
+                ("show", 0, 2),
+            ],
+        },
+    )
+    scores = sorted(_kotlin_scores(tmp_path, _BOARD_KT))
+    assert scores == [
+        ("demo", "place", 75.0),
+        ("demo.Board", "clear", 0.0),
+        ("demo.Board", "show", 75.0),
+        ("demo.Board", "show", 75.0),
+        ("demo.Board", "tick", 50.0),
+    ]
+
+
+def test_a_kotlin_function_whose_class_is_absent_from_the_report_scores_zero(tmp_path):
+    _write_kover(tmp_path, ".", {"demo/Other": [("place", 0, 5), ("tick", 0, 5)]})
+    scores = {name: coverage for _namespace, name, coverage in _kotlin_scores(tmp_path, _BOARD_KT)}
+    assert scores == {"place": 0.0, "tick": 0.0, "show": 0.0, "clear": 0.0}
+
+
+def test_kover_reports_at_the_root_and_two_levels_down_merge_with_jacoco(tmp_path):
+    _write_kover(tmp_path, ".", {"demo/BoardKt": [("place", 0, 4)]})
+    _write_kover(tmp_path, "app", {"demo/Board": [("tick", 1, 1)]})
+    _write_kover(tmp_path, "data/pool", {"demo/Board": [("clear", 3, 1)]})
+    jacoco = tmp_path / "target" / "site" / "jacoco" / "jacoco.xml"
+    jacoco.parent.mkdir(parents=True)
+    jacoco.write_text(
+        '<report><class name="demo/Legacy"><method name="run" line="3">'
+        '<counter type="INSTRUCTION" missed="0" covered="2"/></method></class></report>',
+        encoding="utf-8",
+    )
+    legacy = tmp_path / "src" / "demo" / "Legacy.java"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text("package demo;\nclass Legacy {\n  void run() { }\n}\n", encoding="utf-8")
+    board = tmp_path / "app" / "src" / "main" / "kotlin" / "demo" / "Board.kt"
+    board.parent.mkdir(parents=True)
+    board.write_text(_BOARD_KT, encoding="utf-8")
+    found = analyze_files([board, legacy], tmp_path, load_bundle(tmp_path))
+    scores = {(entry.namespace, entry.name): entry.coverage for entry in found}
+    assert scores[("demo", "place")] == 100.0
+    assert scores[("demo.Board", "tick")] == 50.0
+    assert scores[("demo.Board", "clear")] == 25.0
+    assert scores[("demo.Legacy", "run")] == 100.0
+
+
+def test_an_interface_default_function_scores_from_the_interface_not_its_default_impls_bridge(tmp_path):
+    # Kotlin 2 compiles the body into the interface and leaves a two-instruction
+    # bridge in `$DefaultImpls`, as tyche's report shows for `SavedBet.scoreOrNull`.
+    _write_kover(
+        tmp_path,
+        ".",
+        {"demo/Saved": [("scoreOrNull", 0, 15)], "demo/Saved$DefaultImpls": [("scoreOrNull", 2, 0)]},
+    )
+    source = "package demo\n\ninterface Saved {\n    fun scoreOrNull(): Int? {\n        return null\n    }\n}\n"
+    assert _kotlin_scores(tmp_path, source) == [("demo.Saved", "scoreOrNull", 100.0)]

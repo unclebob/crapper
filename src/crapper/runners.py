@@ -624,6 +624,90 @@ def _cover_fsharp(root: Path) -> None:
             _warn(f"F# coverage exited {code} in {project}. F# coverage will score 0%.")
 
 
+_GRADLE_SETTINGS = ("settings.gradle.kts", "settings.gradle")
+_GRADLE_BUILDS = ("build.gradle.kts", "build.gradle")
+_KOVER_NAMES = ("org.jetbrains.kotlinx.kover", "kotlinx.kover")
+_KOVER_REPORTS = (
+    "build/reports/kover/report.xml",
+    "*/build/reports/kover/report.xml",
+    "*/*/build/reports/kover/report.xml",
+)
+_KOVER_LINES = """\
+  root build file:  plugins { id("org.jetbrains.kotlinx.kover") version "0.9.10" }
+                    dependencies { kover(project(":<module>")) }  (one per module)
+  each module:      plugins { id("org.jetbrains.kotlinx.kover") }"""
+
+
+def _gradle_roots(root: Path, files: list[Path]) -> list[Path]:
+    """The Gradle builds that hold the Kotlin files, by their settings file."""
+
+    found: set[Path] = set()
+    root = root.resolve()
+    for file in files:
+        if Path(file).suffix != ".kt":
+            continue
+        for marker in _GRADLE_SETTINGS:
+            build = _nearest(Path(file), marker, root)
+            if build is not None:
+                found.add(build.resolve())
+                break
+    return sorted(found)
+
+
+def _applies_kover(build: Path) -> bool:
+    for name in _GRADLE_BUILDS:
+        path = build / name
+        if path.is_file():
+            text = path.read_text(encoding="utf-8", errors="replace")
+            return any(kover in text for kover in _KOVER_NAMES)
+    return False
+
+
+def _gradle_command(build: Path) -> list[str] | None:
+    wrapper = build / "gradlew"
+    if wrapper.is_file():
+        return [str(wrapper), ":koverXmlReport"]
+    if shutil.which("gradle"):
+        return ["gradle", ":koverXmlReport"]
+    return None
+
+
+def _remove_kover_reports(root: Path) -> None:
+    """The root and one and two levels down, where the loader reads them."""
+
+    for pattern in _KOVER_REPORTS:
+        for report in root.glob(pattern):
+            report.unlink(missing_ok=True)
+
+
+def _cover_kotlin(root: Path, files: list[Path]) -> None:
+    """Run Kover's merged report in each Gradle root.
+
+    Every Kover report the loader reads goes first, so a skipped or failed run
+    scores 0% instead of scoring from a stale module report.
+    """
+
+    _remove_kover_reports(root)
+    builds = _gradle_roots(root, files)
+    if not builds:
+        _warn("No settings.gradle.kts or settings.gradle; skipping Kotlin coverage.")
+        return
+    for build in builds:
+        if not _applies_kover(build):
+            _warn(
+                f"The Kover plugin is not applied in {build}. Kotlin coverage will score 0%. "
+                f"Add it to the root build file and to each module:\n{_KOVER_LINES}"
+            )
+            continue
+        command = _gradle_command(build)
+        if command is None:
+            _warn(f"No gradlew in {build} and gradle is not installed. Kotlin coverage will score 0%.")
+            continue
+        code = run_shell(command, build)
+        if code != 0:
+            _warn(f"Kotlin coverage exited {code} in {build}. Kotlin coverage will score 0%.")
+
+
 def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
     """Generate coverage reports for the languages present in `files`.
 
@@ -657,4 +741,6 @@ def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
         _cover_rust(root, files)
     if "fsharp" in languages:
         _cover_fsharp(root)
+    if "kotlin" in languages:
+        _cover_kotlin(root, files)
     return 0

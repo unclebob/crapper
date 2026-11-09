@@ -664,3 +664,104 @@ def test_a_symlinked_test_project_never_stops_the_snapshot(tmp_path, monkeypatch
     assert [command[2] for command, _cwd in commands] == [str(linked)]
     found = analyze_files([source], root, load_bundle(root))
     assert [(entry.name, entry.coverage) for entry in found] == [("place", 0.0)]
+
+
+_KOTLIN = "package demo\n\nfun place(x: Int): Int {\n    return x\n}\n"
+
+
+def _gradle_project(root: Path, root_build: str) -> Path:
+    _write(root, "settings.gradle.kts", 'include(":app")\n')
+    _write(root, "build.gradle.kts", root_build)
+    _write(root, "app/build.gradle.kts", "plugins {\n    alias(libs.plugins.kotlinx.kover)\n}\n")
+    return _write(root, "app/src/main/kotlin/demo/Board.kt", _KOTLIN)
+
+
+def _stale_kover_report(root: Path, folder: str = ".") -> None:
+    _write(
+        root,
+        f"{folder}/build/reports/kover/report.xml",
+        '<report><class name="demo/BoardKt"><method name="place" desc="(I)I">'
+        '<counter type="INSTRUCTION" missed="0" covered="4"/></method></class></report>',
+    )
+
+
+def _kotlin_coverage(root: Path, source: Path) -> float | None:
+    [entry] = analyze_files([source], root, load_bundle(root))
+    return entry.coverage
+
+
+_KOVER_ROOT = "plugins {\n    alias(libs.plugins.kotlinx.kover)\n}\n"
+
+
+def test_kotlin_coverage_runs_the_gradle_wrapper_in_the_gradle_root(tmp_path, monkeypatch):
+    source = _gradle_project(tmp_path, _KOVER_ROOT)
+    _write(tmp_path, "gradlew", "#!/bin/sh\n")
+    seen = []
+    monkeypatch.setattr("crapper.runners.shutil.which", lambda name: f"/bin/{name}")
+    monkeypatch.setattr(
+        "crapper.runners.run_shell", lambda command, cwd: seen.append((command, cwd)) or 0
+    )
+    run_coverage(tmp_path, [source], None)
+    assert seen == [([str(tmp_path.resolve() / "gradlew"), ":koverXmlReport"], tmp_path.resolve())]
+
+
+def test_kotlin_coverage_runs_gradle_when_there_is_no_wrapper(tmp_path, monkeypatch):
+    source = _gradle_project(tmp_path, 'plugins {\n    id("org.jetbrains.kotlinx.kover") version "0.9.1"\n}\n')
+    seen = []
+    monkeypatch.setattr("crapper.runners.shutil.which", lambda name: f"/bin/{name}")
+    monkeypatch.setattr(
+        "crapper.runners.run_shell", lambda command, cwd: seen.append((command, cwd)) or 0
+    )
+    run_coverage(tmp_path, [source], None)
+    assert seen == [(["gradle", ":koverXmlReport"], tmp_path.resolve())]
+
+
+def test_kotlin_without_the_kover_plugin_warns_with_the_lines_to_add_and_runs_nothing(
+    tmp_path, monkeypatch, capsys
+):
+    source = _gradle_project(tmp_path, 'dependencies {\n    kover(project(":app"))\n}\n')
+    _write(tmp_path, "gradlew", "#!/bin/sh\n")
+    _stale_kover_report(tmp_path)
+    seen = []
+    monkeypatch.setattr("crapper.runners.run_shell", lambda command, cwd: seen.append(command) or 0)
+    run_coverage(tmp_path, [source], None)
+    err = capsys.readouterr().err
+    assert seen == []
+    assert 'id("org.jetbrains.kotlinx.kover")' in err
+    assert "root build file" in err
+    assert 'kover(project(":<module>"))' in err
+    assert "each module" in err
+    assert _kotlin_coverage(tmp_path, source) == 0.0
+
+
+def test_kotlin_without_gradle_warns_and_scores_zero(tmp_path, monkeypatch, capsys):
+    source = _gradle_project(tmp_path, _KOVER_ROOT)
+    _stale_kover_report(tmp_path)
+    seen = []
+    monkeypatch.setattr("crapper.runners.shutil.which", lambda name: None)
+    monkeypatch.setattr("crapper.runners.run_shell", lambda command, cwd: seen.append(command) or 0)
+    run_coverage(tmp_path, [source], None)
+    assert seen == []
+    assert "Kotlin coverage will score 0%" in capsys.readouterr().err
+    assert _kotlin_coverage(tmp_path, source) == 0.0
+
+
+def test_a_failed_kover_run_warns_and_scores_zero(tmp_path, monkeypatch, capsys):
+    source = _gradle_project(tmp_path, _KOVER_ROOT)
+    _write(tmp_path, "gradlew", "#!/bin/sh\n")
+    _stale_kover_report(tmp_path)
+    _stale_kover_report(tmp_path, "app")
+    _stale_kover_report(tmp_path, "data/pool")
+    monkeypatch.setattr("crapper.runners.run_shell", lambda command, cwd: 1)
+    run_coverage(tmp_path, [source], None)
+    assert "Kotlin coverage exited 1" in capsys.readouterr().err
+    assert _kotlin_coverage(tmp_path, source) == 0.0
+
+
+def test_kotlin_without_gradle_settings_skips_kotlin_coverage(tmp_path, monkeypatch, capsys):
+    source = _write(tmp_path, "src/main/kotlin/demo/Board.kt", _KOTLIN)
+    seen = []
+    monkeypatch.setattr("crapper.runners.run_shell", lambda command, cwd: seen.append(command) or 0)
+    run_coverage(tmp_path, [source], None)
+    assert seen == []
+    assert "skipping Kotlin coverage" in capsys.readouterr().err

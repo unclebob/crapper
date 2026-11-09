@@ -92,6 +92,8 @@ Coverage, when it is produced:
   Rust         cargo llvm-cov, or cargo tarpaulin, in the nearest Cargo.toml
   Python       coverage.py LCOV, via pytest or unittest, per project
   F#           dotnet test Cobertura coverage, per .NET test project
+  Kotlin       gradlew :koverXmlReport in the Gradle root, which must apply
+               the Kover plugin; build/reports/kover/report.xml
 
 uml-viewer joins .metrics/crap.edn on :namespace and :name.
   Clojure      the ns, and the defn name

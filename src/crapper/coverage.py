@@ -1,7 +1,8 @@
-"""Load Cloverage, LCOV, Cobertura, JaCoCo, and Go coverage profiles.
+"""Load Cloverage, LCOV, Cobertura, JaCoCo, Kover, and Go coverage profiles.
 
 Clojure prefers Cloverage's per-line form counts, then LCOV. Java uses JaCoCo
-instruction counters. Go uses statement profiles. Cobertura reports join the
+instruction counters, and Kotlin the same counters from Kover's JaCoCo-shaped
+report. Go uses statement profiles. Cobertura reports join the
 LCOV index. LCOV scores a function by its BRDA branch records when it has any,
 and by line hits otherwise.
 `percent_for` returns None when the file is absent; analysis turns that into 0%.
@@ -436,6 +437,37 @@ def _jacoco_from_index(classes, class_names, method_name, line) -> float | None:
     return nearest.percent
 
 
+def _kotlin_from_index(
+    classes: dict[str, list[tuple[str, JacocoMethod]]], class_name: str, name: str
+) -> float | None:
+    """Sum the methods Kotlin compiles one function into.
+
+    `name-<hash>` is a value-class mangling; `name$<anything>` is a lambda, an
+    `internal` module suffix, `$suspendImpl`, or a default-argument bridge.
+    Kover writes no line numbers, so overloads share one percentage.
+    """
+
+    missed = 0
+    covered = 0
+    found = False
+    for method_name, method in classes.get(class_name, []):
+        if method_name == name or method_name.startswith((f"{name}-", f"{name}$")):
+            found = True
+            missed += method.missed
+            covered += method.covered
+    if not found:
+        return None
+    return coverage_percent(covered, missed + covered)
+
+
+def _by_class(index: dict[str, list[JacocoMethod]]) -> dict[str, list[tuple[str, JacocoMethod]]]:
+    grouped: dict[str, list[tuple[str, JacocoMethod]]] = {}
+    for key, methods in index.items():
+        class_name, method_name = key.split("#", 1)
+        grouped.setdefault(class_name, []).extend((method_name, method) for method in methods)
+    return grouped
+
+
 def _instruction_counter(method):
     for child in list(method):
         if child.tag == "counter" and child.get("type") == "INSTRUCTION":
@@ -486,6 +518,9 @@ class CoverageBundle:
     jacoco: dict[str, list[JacocoMethod]] | None = None
     form_html: dict[str, dict[int, tuple[int, int]]] = field(default_factory=dict)
     source_parts: list[tuple[str, ...]] = field(default_factory=list)
+    _jacoco_by_class: dict[str, list[tuple[str, JacocoMethod]]] | None = field(
+        default=None, init=False, repr=False
+    )
 
     def bind_sources(self, paths: list[str]) -> None:
         """Remember project files so a short path cannot take a longer file's report."""
@@ -501,6 +536,8 @@ class CoverageBundle:
         self.source_parts = found
 
     def percent_for(self, function: Function) -> float | None:
+        if function.language == "kotlin" and function.jacoco_class:
+            return _kotlin_from_index(self._classes(), function.jacoco_class, function.name)
         if function.language == "java":
             names = []
             if function.jacoco_class:
@@ -528,6 +565,11 @@ class CoverageBundle:
         if branched is not None:
             return branched
         return percent_for_range(record, function.start_line, function.end_line)
+
+    def _classes(self) -> dict[str, list[tuple[str, JacocoMethod]]]:
+        if self._jacoco_by_class is None:
+            self._jacoco_by_class = _by_class(self.jacoco or {})
+        return self._jacoco_by_class
 
     def _html_lines(self, path: str) -> dict[int, tuple[int, int]] | None:
         return _lookup(self.form_html, path, self.source_parts)
@@ -594,9 +636,13 @@ def _merge_go(root: Path) -> dict[str, list[tuple[int, int, int, int]]]:
 
 
 def _merge_jacoco(root: Path) -> dict[str, list[JacocoMethod]]:
-    paths = [root / "target" / "site" / "jacoco" / "jacoco.xml"]
-    paths.extend(root.glob("*/target/site/jacoco/jacoco.xml"))
-    paths.extend(root.glob("*/*/target/site/jacoco/jacoco.xml"))
+    """JaCoCo's Maven reports and Kover's Gradle reports share one index."""
+
+    paths: list[Path] = []
+    for report in ("target/site/jacoco/jacoco.xml", "build/reports/kover/report.xml"):
+        paths.append(root / report)
+        paths.extend(root.glob(f"*/{report}"))
+        paths.extend(root.glob(f"*/*/{report}"))
     merged: dict[str, list[JacocoMethod]] = {}
     for text in _merge_texts(paths):
         for key, methods in parse_jacoco_index(text).items():
