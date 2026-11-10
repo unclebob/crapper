@@ -76,6 +76,20 @@ def complexity(node, is_decision, skip) -> int:
     return score
 
 
+def claim(used: set[str], name: str) -> str:
+    """`name`, or `name#2`, `name#3`, ... when an earlier entry took it."""
+
+    if name not in used:
+        used.add(name)
+        return name
+    number = 2
+    while f"{name}#{number}" in used:
+        number += 1
+    chosen = f"{name}#{number}"
+    used.add(chosen)
+    return chosen
+
+
 def binary_logic(node) -> bool:
     return node.type == "binary_expression" and any(
         child.type in {"&&", "||"} for child in node.children
