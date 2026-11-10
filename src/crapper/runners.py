@@ -283,7 +283,11 @@ def _coverage_report(root: Path, module: Path, language: str) -> Path:
     module = module.resolve()
     if module == root:
         return root / "target" / "coverage" / language / "lcov.info"
-    slug = module.relative_to(root).as_posix().replace("/", "__")
+    try:
+        relative = module.relative_to(root).as_posix()
+    except ValueError:
+        relative = module.as_posix()
+    slug = relative.replace("/", "__")
     return root / "target" / "coverage" / language / slug / "lcov.info"
 
 
