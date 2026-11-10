@@ -163,10 +163,44 @@ def _vitest_version(package: Path) -> str | None:
 
 def _manifest_snapshot(package: Path) -> dict[Path, bytes | None]:
     snapshot: dict[Path, bytes | None] = {}
-    for name in ("package.json", "package-lock.json", "npm-shrinkwrap.json"):
+    for name in (
+        "package.json",
+        "package-lock.json",
+        "npm-shrinkwrap.json",
+        "pnpm-lock.yaml",
+        "yarn.lock",
+        "bun.lockb",
+        "bun.lock",
+    ):
         path = package / name
         snapshot[path] = path.read_bytes() if path.is_file() else None
     return snapshot
+
+
+def _package_manager(package: Path) -> str:
+    if (package / "pnpm-lock.yaml").is_file() or (package / "node_modules" / ".pnpm").is_dir():
+        return "pnpm"
+    if (package / "yarn.lock").is_file():
+        return "yarn"
+    if (package / "bun.lockb").is_file() or (package / "bun.lock").is_file():
+        return "bun"
+    data = _package_json(package) or {}
+    pm = str(data.get("packageManager", ""))
+    for candidate in ("pnpm", "yarn", "bun"):
+        if pm.startswith(candidate):
+            return candidate
+    return "npm"
+
+
+def _vitest_install_command(package: Path, spec: str) -> list[str]:
+    manager = _package_manager(package)
+    if manager == "pnpm":
+        return ["pnpm", "add", "-D", "--no-lockfile", spec]
+    if manager == "yarn":
+        return ["yarn", "add", "-D", "--no-lockfile", spec]
+    if manager == "bun":
+        return ["bun", "add", "-d", "--no-save", spec]
+    return ["npm", "install", "--no-save", "--no-package-lock", spec]
 
 
 def _restore_manifests(snapshot: dict[Path, bytes | None]) -> None:
@@ -191,10 +225,7 @@ def _ensure_vitest_coverage(package: Path) -> bool:
     )
     snapshot = _manifest_snapshot(package)
     try:
-        code = run_shell(
-            ["npm", "install", "--no-save", "--no-package-lock", spec],
-            package,
-        )
+        code = run_shell(_vitest_install_command(package, spec), package)
     finally:
         _restore_manifests(snapshot)
     ready = code == 0 and (package / "node_modules" / "@vitest" / "coverage-v8").is_dir()

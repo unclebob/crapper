@@ -547,3 +547,67 @@ def test_vitest_install_restores_manifests_when_install_changes_them(tmp_path, m
 def test_python_sources_name_a_top_level_module_without_its_suffix(tmp_path):
     module = tmp_path / "carddav.py"
     assert python_sources(tmp_path, [module, tmp_path / "test_carddav.py"]) == "carddav"
+
+
+def test_vitest_install_detects_pnpm_yarn_bun_and_package_manager_field(tmp_path):
+    from crapper.runners import _package_manager, _vitest_install_command
+
+    assert _package_manager(tmp_path) == "npm"
+    assert _vitest_install_command(tmp_path, "@vitest/coverage-v8") == [
+        "npm",
+        "install",
+        "--no-save",
+        "--no-package-lock",
+        "@vitest/coverage-v8",
+    ]
+
+    _write(tmp_path, "pnpm-lock.yaml", "lockfileVersion: '9.0'\n")
+    assert _package_manager(tmp_path) == "pnpm"
+    assert _vitest_install_command(tmp_path, "@vitest/coverage-v8") == [
+        "pnpm",
+        "add",
+        "-D",
+        "--no-lockfile",
+        "@vitest/coverage-v8",
+    ]
+    (tmp_path / "pnpm-lock.yaml").unlink()
+
+    _write(tmp_path, "yarn.lock", "")
+    assert _package_manager(tmp_path) == "yarn"
+    assert _vitest_install_command(tmp_path, "@vitest/coverage-v8") == [
+        "yarn",
+        "add",
+        "-D",
+        "--no-lockfile",
+        "@vitest/coverage-v8",
+    ]
+    (tmp_path / "yarn.lock").unlink()
+
+    _write(tmp_path, "bun.lock", "")
+    assert _package_manager(tmp_path) == "bun"
+    assert _vitest_install_command(tmp_path, "@vitest/coverage-v8") == [
+        "bun",
+        "add",
+        "-d",
+        "--no-save",
+        "@vitest/coverage-v8",
+    ]
+    (tmp_path / "bun.lock").unlink()
+
+    _write(tmp_path, "package.json", '{"packageManager": "pnpm@9.1.0"}')
+    assert _package_manager(tmp_path) == "pnpm"
+
+
+def test_parser_for_prefers_bundled_parser_before_download(monkeypatch):
+    import tree_sitter_language_pack as tslp
+    from crapper.languages import treesitter
+
+    treesitter.parser_for.cache_clear()
+    downloads = []
+    monkeypatch.setattr(
+        tslp, "download", lambda langs: downloads.append(langs), raising=False
+    )
+    parser = treesitter.parser_for("python")
+    assert parser is not None
+    assert downloads == []
+
