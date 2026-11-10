@@ -333,14 +333,15 @@ def test_a_failed_coverage_command_ignores_a_stale_report(tmp_path, monkeypatch)
 
 
 def test_changed_files_from_a_real_git_status(tmp_path):
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     _git = ["git", "-C", str(tmp_path)]
-    subprocess.run([*_git, "init"], check=True, capture_output=True)
-    subprocess.run([*_git, "config", "user.email", "t@example.com"], check=True)
-    subprocess.run([*_git, "config", "user.name", "t"], check=True)
+    subprocess.run([*_git, "init"], check=True, capture_output=True, env=env)
+    subprocess.run([*_git, "config", "user.email", "t@example.com"], check=True, env=env)
+    subprocess.run([*_git, "config", "user.name", "t"], check=True, env=env)
     keep = tmp_path / "keep.go"
     keep.write_text("package demo\nfunc Keep() int { return 1 }\n", encoding="utf-8")
-    subprocess.run([*_git, "add", "keep.go"], check=True)
-    subprocess.run([*_git, "commit", "-m", "init"], check=True, capture_output=True)
+    subprocess.run([*_git, "add", "keep.go"], check=True, env=env)
+    subprocess.run([*_git, "commit", "-m", "init"], check=True, capture_output=True, env=env)
     keep.unlink()
     cafe = tmp_path / "café.go"
     cafe.write_text("package demo\nfunc Cafe() int { return 1 }\n", encoding="utf-8")

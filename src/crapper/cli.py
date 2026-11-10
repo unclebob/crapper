@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -173,12 +174,14 @@ class GitError(Exception):
 
 
 def _git(root: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     return subprocess.run(
         ["git", "-C", str(root), *args],
         check=False,
         capture_output=True,
         text=True,
         encoding="utf-8",
+        env=env,
     )
 
 
