@@ -7,6 +7,7 @@ from crapper.languages.java import functions_in_source as java_functions
 from crapper.languages.kotlin import functions_in_source as kotlin_functions
 from crapper.languages.python import functions_in_source as python_functions
 from crapper.languages.rust import functions_in_source as rust_functions
+from crapper.languages.swift import functions_in_source as swift_functions
 from crapper.languages.typescript import functions_in_source as typescript_functions
 from crapper.model import Function
 
@@ -19,6 +20,7 @@ _READERS = {
     "rust": rust_functions,
     "fsharp": fsharp_functions,
     "kotlin": kotlin_functions,
+    "swift": swift_functions,
 }
 
 

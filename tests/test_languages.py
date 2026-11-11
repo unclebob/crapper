@@ -11,6 +11,7 @@ _SOURCES = [
     ("rust", "pub fn open() {}\n", "src/lib.rs", "open"),
     ("fsharp", "module Demo\nlet run x = x\n", "src/Demo.fs", "run"),
     ("kotlin", "package demo\nfun run() = 1\n", "src/Demo.kt", "run"),
+    ("swift", "func run() -> Int { 1 }\n", "Sources/Demo/Demo.swift", "run"),
 ]
 
 

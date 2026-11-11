@@ -45,6 +45,17 @@ def test_kotlin_sources_are_kotlin_and_gradle_scripts_are_not_scored():
     assert is_test_file("app/src/androidTest/java/BoardTest.java") is False
 
 
+def test_swift_sources_are_swift_and_manifests_tests_and_build_folders_are_not_scored():
+    assert language_of("Pool/Sources/Pool/PoolView.swift") == "swift"
+    assert language_of("Pool/Package.swift") is None
+    for folder in (".build", "Pods", "Carthage", "DerivedData"):
+        assert language_of(f"App/{folder}/Lib/Lib.swift") is None
+    assert is_test_file("Pool/Tests/PoolTests/PoolViewTests.swift") is True
+    assert is_test_file("App/AppUITests/LaunchTests.swift") is True
+    assert is_test_file("Pool/Sources/Pool/PoolView.swift") is False
+    assert is_test_file("shared/CoreTests/kotlin/Board.kt") is False
+
+
 def _write(root: Path, relative: str, source: str) -> None:
     path = root / relative
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -308,6 +319,27 @@ def test_changed_selection_ignores_files_git_did_not_name(tmp_path, monkeypatch,
     assert ':name "kept"' in text
     assert "other" not in text
     assert "No source files" not in capsys.readouterr().out
+
+
+def test_changed_selection_skips_swift_manifests_tests_and_build_folders(tmp_path, monkeypatch):
+    changed = {
+        "Pool/Sources/Pool/PoolView.swift": "struct PoolView {\n    func kept() {}\n}\n",
+        "Pool/Package.swift": "func manifest() {}\n",
+        "Pool/Tests/PoolTests/PoolViewTests.swift": "func fromTests() {}\n",
+        "App/AppTests/AppTests.swift": "func fromAppTests() {}\n",
+        "App/Pods/Lib/Lib.swift": "func fromPods() {}\n",
+        "App/.build/checkouts/Dep.swift": "func fromBuild() {}\n",
+        "App/Carthage/Checkouts/Lib.swift": "func fromCarthage() {}\n",
+        "App/DerivedData/Gen.swift": "func fromDerivedData() {}\n",
+    }
+    for relative, text in changed.items():
+        _write(tmp_path, relative, text)
+    status = "".join(f"?? {relative}\0" for relative in changed)
+    monkeypatch.setattr("crapper.cli.subprocess.run", _git_status(tmp_path, status))
+    assert run(["--root", str(tmp_path), "--no-coverage", "--changed"]) == 0
+    text = (tmp_path / ".metrics" / "crap.edn").read_text(encoding="utf-8")
+    assert ':name "kept"' in text
+    assert text.count(":name ") == 1
 
 
 def test_threshold_equal_to_the_score_is_allowed(tmp_path):

@@ -23,6 +23,7 @@ EXTENSIONS = {
     ".fs": "fsharp",
     ".fsx": "fsharp",
     ".kt": "kotlin",
+    ".swift": "swift",
 }
 
 SKIP_DIRS = {
@@ -49,6 +50,9 @@ TEST_DIRS = {"test", "tests", "spec", "specs", "__tests__"}
 DOTNET_TEST_DIR_SUFFIXES = (".Test", ".Tests")
 DOTNET_BUILD_DIRS = {"bin", "obj"}
 KOTLIN_TEST_SOURCE_SET_SUFFIX = "Test"
+SWIFT_TEST_DIR_SUFFIX = "Tests"
+SWIFT_MANIFEST = "Package.swift"
+SWIFT_BUILD_DIRS = {".build", "Pods", "Carthage", "DerivedData"}
 
 GO_TEST_SUFFIX = "_test.go"
 CLOJURE_TEST_SUFFIXES = ("_test.clj", "_test.cljc", "_test.cljs", "_test.bb")
@@ -77,7 +81,16 @@ def language_of(path: str | Path) -> str | None:
     name = file_path.name
     if name.endswith(".d.ts"):
         return None
-    return EXTENSIONS.get(file_path.suffix)
+    language = EXTENSIONS.get(file_path.suffix)
+    if language == "swift" and _is_swift_manifest_or_build_output(file_path):
+        return None
+    return language
+
+
+def _is_swift_manifest_or_build_output(path: Path) -> bool:
+    """`Package.swift`, and files under `.build`, `Pods`, `Carthage`, or `DerivedData`."""
+
+    return path.name == SWIFT_MANIFEST or any(part in SWIFT_BUILD_DIRS for part in path.parts)
 
 
 def is_test_file(path: str | Path) -> bool:
@@ -95,7 +108,11 @@ def is_test_file(path: str | Path) -> bool:
         return True
     if any(part in TEST_DIRS for part in file_path.parts):
         return True
-    return _in_dotnet_test_project(file_path) or _in_kotlin_test_source_set(file_path)
+    return (
+        _in_dotnet_test_project(file_path)
+        or _in_kotlin_test_source_set(file_path)
+        or _in_swift_test_folder(file_path)
+    )
 
 
 def _fsharp_path_has(path: Path, matches) -> bool:
@@ -115,6 +132,14 @@ def _in_kotlin_test_source_set(path: Path) -> bool:
     return any(
         parent == "src" and child.endswith(KOTLIN_TEST_SOURCE_SET_SUFFIX)
         for parent, child in zip(parts, parts[1:])
+    )
+
+
+def _in_swift_test_folder(path: Path) -> bool:
+    """`Tests`, and Xcode test targets such as `CoreTests` and `AppUITests`."""
+
+    return language_of(path) == "swift" and any(
+        part.endswith(SWIFT_TEST_DIR_SUFFIX) for part in path.parts[:-1]
     )
 
 

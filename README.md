@@ -1,8 +1,8 @@
 # crapper
 
-This is a fork of [unclebob/crapper](https://github.com/unclebob/crapper) that adds F# and Kotlin support. Thanks to Robert C. Martin for the original tool.
+This is a fork of [unclebob/crapper](https://github.com/unclebob/crapper) that adds F#, Kotlin, and Swift support. Thanks to Robert C. Martin for the original tool.
 
-CRAP scores for Clojure, Java, Go, TypeScript, Rust, Python, F#, and Kotlin. One run detects the language of each source file, applies that language's complexity and coverage rules, and writes the snapshot [uml-viewer](https://github.com/unclebob/uml-viewer) already reads.
+CRAP scores for Clojure, Java, Go, TypeScript, Rust, Python, F#, Kotlin, and Swift. One run detects the language of each source file, applies that language's complexity and coverage rules, and writes the snapshot [uml-viewer](https://github.com/unclebob/uml-viewer) already reads.
 
 The formula is the one from [crap4clj](https://github.com/unclebob/crap4clj), [crap4java](https://github.com/unclebob/crap4java), and [crap4go](https://github.com/unclebob/crap4go):
 
@@ -59,6 +59,7 @@ uml-viewer groups entries by `:namespace` and joins each operation on `:name`. `
 | Python | the dotted module path, or `module.Class` | the function or method name |
 | F# | the `namespace` and `module` path, or `Namespace.Module.Type` | the function, member, or active pattern name |
 | Kotlin | the `package`, or `package.Class` (`package.Outer.Inner`, `package.Class.Companion`, `package.Enum.VALUE`) | the function name |
+| Swift | `Module.Type` (`Module.Outer.Inner`; an extension as the type it extends) when the path has `Sources/<Module>/`, otherwise `Type`; a top-level function takes `Module`, or the file stem | the function or property name, `init`, `deinit`, or `subscript` |
 
 Rename or move is a new entry. There is no identity matching across runs.
 
@@ -79,6 +80,8 @@ Python counts `if`, `elif`, `for`, `while`, `except`, each `match` case, a compr
 F# (`.fs` and `.fsx`) counts `if`, `elif`, `for`, `while`, each arm of `match`, `function`, and `try ... with`, each `when` guard, and `&&` / `||`; `let!` and combinators such as `Option.map` add nothing. Module- and type-level functions, members, active patterns, and values bound to a lambda or an object expression are entries. Signature files (`.fsi`), `bin`, `obj`, and `*.Test` / `*.Tests` folders are skipped. Coverage is Cobertura from Microsoft Code Coverage, run per test project, with nothing to install. A `--coverage-command` for F# writes its Cobertura reports under `target/coverage/fsharp/`.
 
 Kotlin (`.kt`) counts `if`, `for`, `while`, `do ... while`, each `when` arm except `else`, each `catch`, and each `&&`, `||`, `?:`, and `?.`. Top-level functions, extension functions, and the functions of classes, objects, companion objects, and enum values with their own body are entries; a local function, a lambda, or an anonymous object stays in the enclosing function. Constructors, `init` blocks, property accessors, and abstract functions are not entries. A file with no `package` line uses the file stem as the namespace of its top-level functions. Gradle scripts (`.kts`), `build`, `src/test`, and `src/*Test` source sets such as `src/androidTest` and `src/commonTest` are skipped. Coverage is Kover's `INSTRUCTION` counter, read like JaCoCo's: a function takes every method of its JVM class named after it, including `name-<hash>` (value-class mangling) and `name$...` (lambdas, `internal` names, default-argument bridges). Kover records no line numbers, so overloads share one percentage. Kover is a prerequisite crapper does not add: apply `id("org.jetbrains.kotlinx.kover")` in the root build file, with `kover(project(":module"))` for each module under `dependencies`, and in each module's build file. Without it the run warns with those lines and Kotlin scores 0%.
+
+Swift (`.swift`) counts `if`, `guard`, `for`, `while`, `repeat ... while`, each `switch` case except `default`, each `catch`, each `&&`, `||`, `??`, ternary `? :`, and optional chaining `?.`, each comma between the conditions of an `if`, `guard`, or `while`, and a `where` clause on a `for`, `case`, or `catch`. So `guard let a, let b, c else` adds 3, a `case .a, .b:` adds 1, and `try?` adds nothing. Functions, initializers (`init`), `deinit`, and `subscript` with a body are entries, and so are properties with a body: a computed property (getter and setter are one entry), `willSet` / `didSet` observers, and a property initialised by a closure, each named after the property. A nested function or a closure stays in the enclosing entry, and protocol requirements are not entries. The namespace starts with the module, the folder after `Sources/` in the file's absolute path (`Pool/Sources/Pool/...` gives `Pool.PoolViewModel`), so it does not change with the root crapper runs from; a path without `Sources/<Module>/`, such as an app target, gets the type chain alone. `Package.swift`, `.build`, `Pods`, `Carthage`, `DerivedData`, and folders named `Tests` or `*Tests` (`CoreTests`, `AppUITests`) are skipped, also under `--changed`.
 
 ## Coverage commands
 

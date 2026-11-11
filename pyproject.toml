@@ -1,7 +1,7 @@
 [project]
 name = "crapper"
 version = "0.1.0"
-description = "CRAP scores for Clojure, Java, Go, TypeScript, Rust, and Python, in the snapshot uml-viewer reads."
+description = "CRAP scores for Clojure, Java, Go, TypeScript, Rust, Python, F#, Kotlin, and Swift, in the snapshot uml-viewer reads."
 readme = "README.md"
 license = { file = "LICENSE" }
 classifiers = ["License :: OSI Approved :: Zero-Clause BSD (0BSD)"]

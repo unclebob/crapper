@@ -18,6 +18,9 @@ from crapper.discover import (
     JS_TEST_SUFFIXES,
     KOTLIN_TEST_SOURCE_SET_SUFFIX,
     SKIP_DIRS,
+    SWIFT_BUILD_DIRS,
+    SWIFT_MANIFEST,
+    SWIFT_TEST_DIR_SUFFIX,
     TEST_DIRS,
     is_test_file,
     iter_source_files,
@@ -30,6 +33,7 @@ from crapper.runners import run_coverage
 
 _SKIPPED_DIRS = ", ".join(sorted(SKIP_DIRS | TEST_DIRS))
 _TEST_DIRS_DOTNET = " and ".join(f"*{suffix}" for suffix in DOTNET_TEST_DIR_SUFFIXES)
+_SWIFT_BUILD_DIRS = ", ".join(sorted(SWIFT_BUILD_DIRS))
 _TEST_PATTERNS = ", ".join(
     [
         f"*{GO_TEST_SUFFIX}",
@@ -50,7 +54,7 @@ and prints a report sorted worst first.
 
 Languages: Clojure (.clj .cljc .cljs .bb), Java (.java), Go (.go),
 TypeScript and JavaScript (.ts .tsx .mts .cts .js .jsx .mjs .cjs),
-Rust (.rs), Python (.py), F# (.fs .fsx), Kotlin (.kt).
+Rust (.rs), Python (.py), F# (.fs .fsx), Kotlin (.kt), Swift (.swift).
 
 Options:
   -h, --help                    Print this help and exit.
@@ -83,6 +87,8 @@ named {_SKIPPED_DIRS} are skipped, as are {_TEST_PATTERNS}.
 F# also skips .fsi files, bin, obj, and {_TEST_DIRS_DOTNET} folders.
 Kotlin also skips .kts files and src/*{KOTLIN_TEST_SOURCE_SET_SUFFIX} source sets
 such as src/androidTest.
+Swift also skips {SWIFT_MANIFEST}, {_SWIFT_BUILD_DIRS}, and
+folders named {SWIFT_TEST_DIR_SUFFIX} or *{SWIFT_TEST_DIR_SUFFIX} such as CoreTests.
 
 Coverage, when it is produced:
   Clojure      clj -M:cov --lcov, then Cloverage form counts or LCOV
@@ -104,6 +110,7 @@ uml-viewer joins .metrics/crap.edn on :namespace and :name.
   Python       dotted module path, or module.Class for methods
   F#           namespace and module path, or path.Type for members
   Kotlin       the package, or package.Class for members
+  Swift        the module after Sources/, then the type chain, or the file stem
 """
 
 
