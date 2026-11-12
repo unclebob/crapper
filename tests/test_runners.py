@@ -19,6 +19,10 @@ from crapper.runners import (
     _restore_manifests,
     _rust_kind,
     _vitest_version,
+    _rename_coverlet_reports,
+    csharp_command,
+    csharp_targets,
+    csharp_test_projects,
     python_coverage_commands,
     python_roots,
     python_sources,
@@ -547,3 +551,83 @@ def test_vitest_install_restores_manifests_when_install_changes_them(tmp_path, m
 def test_python_sources_name_a_top_level_module_without_its_suffix(tmp_path):
     module = tmp_path / "carddav.py"
     assert python_sources(tmp_path, [module, tmp_path / "test_carddav.py"]) == "carddav"
+
+
+_TEST_CSPROJ = (
+    '<Project Sdk="Microsoft.NET.Sdk">\n  <ItemGroup>\n'
+    '    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.0.0" />\n'
+    '    <PackageReference Include="coverlet.collector" Version="6.0.0" />\n'
+    "  </ItemGroup>\n</Project>\n"
+)
+
+
+def test_csharp_runs_the_solution_at_the_root_with_coverlet_lcov(tmp_path):
+    _write(tmp_path, "Demo.sln", "")
+    _write(tmp_path, "src/Demo/Demo.csproj", '<Project Sdk="Microsoft.NET.Sdk" />\n')
+    tests = _write(tmp_path, "tests/Demo.Tests/Demo.Tests.csproj", _TEST_CSPROJ)
+    _write(tmp_path, "tests/Demo.Tests/obj/Demo.Tests.csproj", _TEST_CSPROJ)
+    assert csharp_test_projects(tmp_path) == [tests]
+    assert csharp_targets(tmp_path) == [tmp_path / "Demo.sln"]
+    report_dir = tmp_path / "target" / "coverage" / "csharp"
+    command = csharp_command(tmp_path / "Demo.sln", report_dir)
+    assert command[:3] == ["dotnet", "test", str(tmp_path / "Demo.sln")]
+    assert "--collect:XPlat Code Coverage" in command
+    assert command[command.index("--results-directory") + 1] == str(report_dir)
+    assert command[-2:] == ["--", "DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=lcov"]
+
+
+def test_csharp_without_a_solution_runs_each_test_project(tmp_path):
+    one = _write(tmp_path, "a/A.Tests/A.Tests.csproj", _TEST_CSPROJ)
+    two = _write(tmp_path, "b/B.Tests/B.Tests.csproj", "<Project><PropertyGroup><IsTestProject>true</IsTestProject></PropertyGroup></Project>\n")
+    _write(tmp_path, "src/Lib/Lib.csproj", '<Project Sdk="Microsoft.NET.Sdk" />\n')
+    assert csharp_targets(tmp_path) == [one, two]
+
+
+def test_coverlet_reports_are_renamed_for_the_lcov_loader(tmp_path):
+    report_dir = tmp_path / "target" / "coverage" / "csharp"
+    _write(report_dir, "0f3a/coverage.info", "TN:\nSF:/x/A.cs\nend_of_record\n")
+    _write(report_dir, "77b1/coverage.info", "TN:\nSF:/x/B.cs\nend_of_record\n")
+    assert _rename_coverlet_reports(report_dir) == 2
+    assert sorted(path.relative_to(report_dir).as_posix() for path in report_dir.rglob("*.info")) == [
+        "0f3a/lcov.info",
+        "77b1/lcov.info",
+    ]
+
+
+def test_csharp_coverage_is_issued_per_target_and_its_lcov_is_found(tmp_path, monkeypatch):
+    commands: list[list[str]] = []
+
+    def shell(command, cwd):
+        commands.append(command)
+        results = Path(command[command.index("--results-directory") + 1])
+        _write(results, "guid/coverage.info", "TN:\nend_of_record\n")
+        return 0
+
+    monkeypatch.setattr("crapper.runners.run_shell", shell)
+    _write(tmp_path, "Demo.sln", "")
+    _write(tmp_path, "tests/Demo.Tests/Demo.Tests.csproj", _TEST_CSPROJ)
+    source = _write(tmp_path, "src/Demo/Program.cs", "class P { void Run() { } }\n")
+    stale = _write(tmp_path, "target/coverage/csharp/old/lcov.info", "stale\n")
+    run_coverage(tmp_path, [source], None)
+    assert [command[:2] for command in commands] == [["dotnet", "test"]]
+    assert not stale.exists()
+    assert (tmp_path / "target" / "coverage" / "csharp" / "guid" / "lcov.info").is_file()
+
+
+def test_csharp_coverage_warnings(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr("crapper.runners.run_shell", lambda command, cwd: 3)
+    source = _write(tmp_path, "src/Demo/Program.cs", "class P { void Run() { } }\n")
+    run_coverage(tmp_path, [source], None)
+    assert "skipping C# coverage" in capsys.readouterr().err
+
+    _write(tmp_path, "Demo.sln", "")
+    _write(
+        tmp_path,
+        "tests/Demo.Tests/Demo.Tests.csproj",
+        '<Project><ItemGroup><PackageReference Include="Microsoft.NET.Test.Sdk" /></ItemGroup></Project>\n',
+    )
+    run_coverage(tmp_path, [source], None)
+    err = capsys.readouterr().err
+    assert "coverlet.collector" in err
+    assert "dotnet test exited 3 for Demo.sln" in err
+    assert "wrote no coverage.info" in err

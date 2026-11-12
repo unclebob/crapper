@@ -1,6 +1,6 @@
 # crapper
 
-CRAP scores for Clojure, Java, Go, TypeScript, Rust, and Python. One run detects the language of each source file, applies that language's complexity and coverage rules, and writes the snapshot [uml-viewer](https://github.com/unclebob/uml-viewer) already reads.
+CRAP scores for Clojure, Java, Go, TypeScript, Rust, Python, and C#. One run detects the language of each source file, applies that language's complexity and coverage rules, and writes the snapshot [uml-viewer](https://github.com/unclebob/uml-viewer) already reads.
 
 The formula is the one from [crap4clj](https://github.com/unclebob/crap4clj), [crap4java](https://github.com/unclebob/crap4java), and [crap4go](https://github.com/unclebob/crap4go):
 
@@ -52,6 +52,7 @@ uml-viewer groups entries by `:namespace` and joins each operation on `:name`. `
 | TypeScript | the dotted module path, or `module.Class` | the function or method name |
 | Rust | `crate::module`, or `crate::module::Type` | the function or method name |
 | Python | the dotted module path, or `module.Class` | the function or method name |
+| C# | `Namespace.Class`, or `Namespace.Outer.Inner`; `RootNamespace.Program` for top-level statements, from the nearest `.csproj` | the method name, an accessor as `get_Count`, or `<Main>$` |
 
 Rename or move is a new entry. There is no identity matching across runs.
 
@@ -69,6 +70,8 @@ Rust counts `if`, loops, each `match` arm, `?`, and `&&` / `||`. `mod tests` is 
 
 Python counts `if`, `elif`, `for`, `while`, `except`, each `match` case, a comprehension filter, a conditional expression, and each `and` / `or`. Nested functions stay inside the enclosing function. Coverage is LCOV from `coverage.py`, running pytest when the project uses it and `unittest` otherwise. `coverage` and `pytest` are installed into the project's interpreter when they are missing.
 
+C# uses the same structural decisions as Java, spelled in C#: `if`, `for`, `foreach`, `while`, `do`, `catch` and its `when` filter, `?:`, each `switch` section and its `when` guard, each switch-expression arm, `&&` / `||`, plus `??`, `?.`, and `and` / `or` inside a pattern. Methods with a body (a block or `=> expression`) are entries; so are property, indexer, and event accessors with a body, and expression-bodied properties, under the compiler's names `get_Count`, `set_Item`, `add_Changed`. Constructors, operators, and finalizers are omitted, like crap4java's constructors. Lambdas and local functions stay inside the enclosing entry. Top-level statements are one entry, `<Main>$` in `Program`, keyed under the project's root namespace (`RootNamespace` in the nearest `.csproj`, else that file's name) so two projects' `Program.cs` stay apart. A minimal-API endpoint registered with a lambda (`app.MapGet("/users", ...)`, `MapPost`, `MapPut`, `MapPatch`, `MapDelete`, `Map`, `MapMethods`) is its own entry named `GET /users`, with `#2` for a second lambda on the same route, and its decisions are not charged to the enclosing entry: the Express rule. Generated sources under `obj/` are skipped, and `*Tests.cs`, `*Test.cs`, and files inside a `*.Tests` project are test code. Coverage is LCOV from coverlet: `dotnet test --collect:"XPlat Code Coverage"` on each solution at the root, or on each test project when there is no solution, with `coverlet.collector` referenced by the test project.
+
 ## Coverage commands
 
 By default a run deletes the previous report for each language it is about to measure and regenerates it:
@@ -81,6 +84,7 @@ By default a run deletes the previous report for each language it is about to me
 | TypeScript | `npm run coverage`, or Vitest `--coverage`, or `npx c8 ... npm test` | `coverage/lcov.info` or `target/coverage/typescript/lcov.info` |
 | Rust | `cargo llvm-cov` or `cargo tarpaulin`, per Cargo package | `target/coverage/rust/lcov.info` |
 | Python | `coverage run` with pytest or unittest, then `coverage lcov` | `target/coverage/python/lcov.info` |
+| C# | `dotnet test <sln> --collect:"XPlat Code Coverage" -- ...Format=lcov`, per solution at the root or per test project | `target/coverage/csharp/*/lcov.info` |
 
 A missing tool or a failed test run scores that language at 0% and still writes the snapshot. Pass `--coverage-command` to replace those defaults with one command of your own. `--no-coverage` is the run that leaves coverage and CRAP as N/A.
 

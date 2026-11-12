@@ -28,6 +28,11 @@ def test_language_detection():
     assert is_test_file("app.test.cts") is True
     assert is_test_file("app.spec.cts") is True
     assert is_test_file("app.cts") is False
+    assert language_of("src/Host/Program.cs") == "csharp"
+    assert is_test_file("tests/Host.Tests/ProgramTests.cs") is True
+    assert is_test_file("src/Host/ProgramTests.cs") is True
+    assert is_test_file("src/Host.Tests/Fixture.cs") is True
+    assert is_test_file("src/Host/Program.cs") is False
 
 
 def _write(root: Path, relative: str, source: str) -> None:
