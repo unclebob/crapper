@@ -102,13 +102,19 @@ Coverage, when it is produced:
                the Kover plugin; build/reports/kover/report.xml
   Swift        only with --coverage-command: an Xcode test run with coverage
                and its derived data in target/coverage/swift/, whose profile
-               crapper converts with llvm-cov to target/coverage/swift/lcov.info.
-               Example:
+               crapper converts with llvm-cov, or a swift test export copied
+               there; both go to target/coverage/swift/lcov.info.
+               Xcode example:
                --coverage-command 'rm -rf target/coverage/swift &&
                  xcodebuild test -workspace App.xcworkspace -scheme App \\
                  -destination "platform=iOS Simulator,name=iPhone 17" \\
                  -enableCodeCoverage YES \\
                  -derivedDataPath target/coverage/swift/DerivedData'
+               Swift package example:
+               --coverage-command 'rm -rf target/coverage/swift &&
+                 mkdir -p target/coverage/swift &&
+                 swift test --enable-code-coverage &&
+                 cp "$(swift test --show-codecov-path)" target/coverage/swift/'
                Without the command, or when it exits non-zero, Swift scores 0%.
 
 uml-viewer joins .metrics/crap.edn on :namespace and :name.

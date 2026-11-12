@@ -1,3 +1,4 @@
+import json
 import subprocess
 from pathlib import Path
 
@@ -169,3 +170,136 @@ def test_a_folder_without_a_profile_warns_and_writes_nothing(tmp_path, monkeypat
     assert "target/coverage/swift" in err
     assert "-derivedDataPath" in err
     assert not stale.exists()
+
+
+# Segments as `swift test --enable-code-coverage` exports them for
+#
+#  2      public init() {}
+#  4      public func label(_ score: Int) -> String {
+#  5          guard score >= 0 else { return "invalid" }
+#  6          if score >= 90 { return "A" } else { return "B" }
+#  7      }
+# 17      public func untested(_ value: Int) -> Int {
+# 18          if value > 0 {
+# 19              return value * 2
+# 20          }
+# 21          return -value
+# 22      }
+#
+# after a test that calls `label(95)`: [line, column, count, hasCount, isRegionEntry, isGapRegion].
+_GRADE_SEGMENTS = [
+    [2, 19, 2, True, True, False],
+    [2, 21, 0, False, False, False],
+    [4, 47, 1, True, True, False],
+    [5, 31, 0, True, True, False],
+    [5, 51, 1, True, True, False],
+    [6, 12, 1, True, True, False],
+    [6, 23, 1, True, False, False],
+    [6, 24, 1, True, True, False],
+    [6, 38, 1, True, False, False],
+    [6, 44, 0, True, True, False],
+    [6, 58, 1, True, False, False],
+    [7, 6, 0, False, False, False],
+    [17, 47, 0, True, True, False],
+    [18, 12, 0, True, True, False],
+    [18, 21, 0, True, False, False],
+    [18, 22, 0, True, True, False],
+    [20, 10, 0, True, True, False],
+    [21, 22, 0, True, False, False],
+    [22, 6, 0, False, False, False],
+]
+
+
+def _export_file(path: Path | str, segments: list, count: int, covered: int) -> dict:
+    return {
+        "filename": str(path),
+        "segments": segments,
+        "branches": [],
+        "expansions": [],
+        "summary": {"lines": {"count": count, "covered": covered}},
+    }
+
+
+def _swift_test_export(root: Path, name: str, files: list[dict]) -> Path:
+    """What `cp "$(swift test --show-codecov-path)" target/coverage/swift/` leaves."""
+
+    export = {
+        "type": "llvm.coverage.json.export",
+        "version": "3.0.1",
+        "data": [{"files": files, "functions": [], "totals": {}}],
+    }
+    return _write(root, f"target/coverage/swift/{name}", json.dumps(export))
+
+
+def test_an_export_converts_each_line_as_its_summary_counts_it(tmp_path, monkeypatch):
+    grade = _write(tmp_path, "Sources/Scratch/Grade.swift")
+    entry_point = tmp_path / ".build/out/DerivedSources/test_entry_point.swift"
+    _swift_test_export(
+        tmp_path,
+        "Scratch.json",
+        [
+            _export_file(grade, _GRADE_SEGMENTS, count=11, covered=5),
+            _export_file(entry_point, [[1, 1, 1, True, True, False], [2, 1, 0, False, False, False]], 1, 1),
+        ],
+    )
+    monkeypatch.setattr("crapper.languages.swift_coverage.shutil.which", lambda name: None)
+    convert(tmp_path, [grade])
+    converted = _converted(tmp_path)
+    # Line 3 and lines 8 to 16 are not executable; lines 5 and 6 hold a covered
+    # and an uncovered region and are covered; lines 17 to 22 are uncovered.
+    assert converted == {
+        str(grade): {
+            2: (1, 1), 4: (1, 1), 5: (1, 1), 6: (1, 1), 7: (1, 1),
+            17: (0, 1), 18: (0, 1), 19: (0, 1), 20: (0, 1), 21: (0, 1), 22: (0, 1),
+        }
+    }
+    lines = converted[str(grade)].values()
+    assert (len(lines), sum(covered for covered, _ in lines)) == (11, 5)
+
+
+def test_a_file_in_an_export_and_in_an_xcode_profile_is_covered_where_either_covers_it(
+    tmp_path, monkeypatch
+):
+    grade = _write(tmp_path, "Sources/Scratch/Grade.swift")
+    profile = _derived_data(tmp_path)
+    _swift_test_export(tmp_path, "Scratch.json", [_export_file(grade, _GRADE_SEGMENTS, 11, 5)])
+    _fake_llvm_cov(monkeypatch, {profile: _record(grade, {2: 0, 4: 0, 18: 3, 19: 3, 30: 0})})
+    convert(tmp_path, [grade])
+    assert _converted(tmp_path) == {
+        str(grade): {
+            2: (1, 1), 4: (1, 1), 5: (1, 1), 6: (1, 1), 7: (1, 1),
+            17: (0, 1), 18: (1, 1), 19: (1, 1), 20: (0, 1), 21: (0, 1), 22: (0, 1), 30: (0, 1),
+        }
+    }
+
+
+def test_exports_convert_without_xcrun_while_xcode_profiles_are_skipped(tmp_path, monkeypatch, capsys):
+    grade = _write(tmp_path, "Sources/Scratch/Grade.swift")
+    profile = _derived_data(tmp_path)
+    _swift_test_export(tmp_path, "Scratch.json", [_export_file(grade, _GRADE_SEGMENTS[:2], 1, 1)])
+    calls = []
+    monkeypatch.setattr("crapper.languages.swift_coverage.shutil.which", lambda name: None)
+    monkeypatch.setattr(
+        "crapper.languages.swift_coverage.subprocess.run", lambda *args, **_kw: calls.append(args)
+    )
+    convert(tmp_path, [grade])
+    err = capsys.readouterr().err
+    assert calls == []
+    assert "xcrun" in err and str(profile) in err
+    assert _converted(tmp_path) == {str(grade): {2: (1, 1)}}
+
+
+def test_a_json_file_that_is_not_a_coverage_export_is_skipped_with_a_warning(
+    tmp_path, monkeypatch, capsys
+):
+    grade = _write(tmp_path, "Sources/Scratch/Grade.swift")
+    resolved = _write(tmp_path, "target/coverage/swift/Package.resolved.json", '{"pins": []}')
+    broken = _write(tmp_path, "target/coverage/swift/broken.json", "{not json")
+    export = _swift_test_export(tmp_path, "Scratch.json", [_export_file(grade, _GRADE_SEGMENTS[:2], 1, 1)])
+    monkeypatch.setattr("crapper.languages.swift_coverage.shutil.which", lambda name: None)
+    convert(tmp_path, [grade])
+    err = capsys.readouterr().err
+    assert str(resolved) in err
+    assert str(broken) in err
+    assert str(export) not in err
+    assert _converted(tmp_path) == {str(grade): {2: (1, 1)}}

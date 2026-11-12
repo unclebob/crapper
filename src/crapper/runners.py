@@ -714,6 +714,10 @@ _SWIFT_COMMAND = (
     '-scheme App -destination "platform=iOS Simulator,name=iPhone 17" '
     "-enableCodeCoverage YES -derivedDataPath target/coverage/swift/DerivedData"
 )
+_SWIFT_PACKAGE_COMMAND = (
+    "rm -rf target/coverage/swift && mkdir -p target/coverage/swift && "
+    'swift test --enable-code-coverage && cp "$(swift test --show-codecov-path)" target/coverage/swift/'
+)
 
 
 def _cover_swift(root: Path) -> None:
@@ -721,10 +725,12 @@ def _cover_swift(root: Path) -> None:
 
     swift_coverage.remove_lcov(root)
     _warn(
-        "Swift coverage needs --coverage-command with an Xcode test command that keeps "
-        f"its derived data in {root / swift_coverage.COVERAGE_DIR}. "
-        "Swift coverage will score 0%. For example:\n"
-        f"  crapper --coverage-command '{_SWIFT_COMMAND}'"
+        "Swift coverage needs --coverage-command with an Xcode or swift test command that "
+        f"leaves its coverage in {root / swift_coverage.COVERAGE_DIR}. "
+        "Swift coverage will score 0%. For example, for an Xcode project:\n"
+        f"  crapper --coverage-command '{_SWIFT_COMMAND}'\n"
+        "or for a Swift package:\n"
+        f"  crapper --coverage-command '{_SWIFT_PACKAGE_COMMAND}'"
     )
 
 

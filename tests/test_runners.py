@@ -830,6 +830,9 @@ def test_without_a_command_swift_warns_removes_its_lcov_and_keeps_the_bundles(
     assert seen == []
     assert "--coverage-command" in err
     assert "target/coverage/swift" in err
+    assert "xcodebuild test" in err
+    assert "swift test --enable-code-coverage" in err
+    assert "swift test --show-codecov-path" in err
     assert "Swift coverage will score 0%" in err
     assert not lcov.exists()
     assert (bundle / "Info.plist").is_file()

@@ -97,17 +97,23 @@ By default a run deletes the previous report for each language it is about to me
 | Python | `coverage run` with pytest or unittest, then `coverage lcov` | `target/coverage/python/lcov.info` |
 | F# | `dotnet test <project> --collect:"Code Coverage;Format=cobertura"`, per test project | `target/coverage/fsharp/**/*.cobertura.xml` |
 | Kotlin | `./gradlew :koverXmlReport` (or `gradle`) in the directory with `settings.gradle.kts` or `settings.gradle`, when its build file applies Kover | `build/reports/kover/report.xml` |
-| Swift | none: only the command you pass with `--coverage-command` | Xcode derived data in `target/coverage/swift/DerivedData/`, converted to `target/coverage/swift/lcov.info` |
+| Swift | none: only the command you pass with `--coverage-command` | Xcode derived data in `target/coverage/swift/DerivedData/`, or `swift test` exports (`target/coverage/swift/*.json`), converted to `target/coverage/swift/lcov.info` |
 
 A missing tool or a failed test run scores that language at 0% and still writes the snapshot. Pass `--coverage-command` to replace those defaults with one command of your own. `--no-coverage` is the run that leaves coverage and CRAP as N/A.
 
-Swift needs that command. It runs in the project root, must remove `target/coverage/swift/` first, and must run the tests with coverage and with its derived data in that folder, for example:
+Swift needs that command. It runs in the project root, must remove `target/coverage/swift/` first, and must run the tests with coverage and leave what they record in that folder. For an Xcode project, keep the derived data there, for example:
 
 ```bash
 crapper --coverage-command 'rm -rf target/coverage/swift && xcodebuild test -workspace App.xcworkspace -scheme App -destination "platform=iOS Simulator,name=iPhone 17" -enableCodeCoverage YES -derivedDataPath target/coverage/swift/DerivedData'
 ```
 
-When it exits zero, crapper reads each profile under `DerivedData/Build/ProfileData/` with `xcrun llvm-cov export -format=lcov`, against the test bundles and apps in `DerivedData/Build/Products/`, so packages linked into those binaries are covered too (`xccov` reports them as empty). It writes the executable lines of the Swift files it scores to `target/coverage/swift/lcov.info`; a file in several profiles or binaries counts a line as covered when any of them covered it. Without `xcrun`, as on Linux, those inputs are skipped with a warning. When the command exits non-zero nothing is converted and the old `lcov.info` is removed, so Swift scores 0%, also on a following `--use-existing-coverage`. Without `--coverage-command` the run warns with an example, removes that `lcov.info`, and scores Swift 0%; the derived data stays for the command to clean. `--use-existing-coverage` reads only `lcov.info`, so an `xcodebuild` run by hand is not read. Because the derived data lives in that folder and the command removes it first, each run builds from scratch.
+For a Swift package without an Xcode project, run `swift test` with coverage and copy the export it writes, whose path `swift test --show-codecov-path` prints, into the folder:
+
+```bash
+crapper --coverage-command 'rm -rf target/coverage/swift && mkdir -p target/coverage/swift && swift test --enable-code-coverage && cp "$(swift test --show-codecov-path)" target/coverage/swift/'
+```
+
+When it exits zero, crapper reads each profile under `DerivedData/Build/ProfileData/` with `xcrun llvm-cov export -format=lcov`, against the test bundles and apps in `DerivedData/Build/Products/`, so packages linked into those binaries are covered too (`xccov` reports them as empty). It writes the executable lines of the Swift files it scores to `target/coverage/swift/lcov.info`; a file in several profiles or binaries counts a line as covered when any of them covered it. Without `xcrun`, as on Linux, those inputs are skipped with a warning. Each `*.json` export in `target/coverage/swift/` is read without `xcrun`: crapper derives each line's count from the export's regions the way `llvm-cov` does and merges it into the same `lcov.info`, so a file both runs cover counts a line as covered when either covered it; a JSON file that is not a coverage export is skipped with a warning. When the command exits non-zero nothing is converted and the old `lcov.info` is removed, so Swift scores 0%, also on a following `--use-existing-coverage`. Without `--coverage-command` the run warns with an example, removes that `lcov.info`, and scores Swift 0%; the derived data stays for the command to clean. `--use-existing-coverage` reads only `lcov.info`, so an `xcodebuild` or `swift test` run by hand is not read. Because the derived data lives in that folder and the command removes it first, each run builds from scratch.
 
 ## Development
 

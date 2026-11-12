@@ -13,10 +13,18 @@ paths, so a test or third-party file cannot match a source file by suffix. A
 file in several inputs, or in several binaries, is merged line by line, so a
 line is covered when any of them covered it. Without `xcrun`, as on Linux,
 the Xcode inputs are skipped with a warning.
+
+A `swift test --enable-code-coverage` run instead leaves a JSON export, which
+the command copies into the folder from the path `swift test
+--show-codecov-path` prints. Its per-line counts are derived from each file's
+segments the way `llvm-cov` derives its own LCOV lines, and merged into the
+same file; exports need no `xcrun`. A JSON file that is not a coverage export
+is skipped with a warning.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import platform
 import shutil
@@ -29,6 +37,7 @@ from crapper.discover import language_of
 COVERAGE_DIR = Path("target") / "coverage" / "swift"
 _PROFILES = ("Build/ProfileData/*/*.profdata", "*/Build/ProfileData/*/*.profdata")
 _BINARIES = ("*/*.xctest", "*/*.app", "*/*.app/PlugIns/*.xctest")
+_EXPORT_TYPE = "llvm.coverage.json.export"
 
 
 def _warn(message: str) -> None:
@@ -98,17 +107,68 @@ def _export(profile: Path, binaries: list[Path]) -> str | None:
     return completed.stdout
 
 
+def _counts_for(merged: dict[str, dict[int, int]], path: str, sources: dict[str, str]) -> dict[int, int] | None:
+    source = sources.get(os.path.realpath(path))
+    return None if source is None else merged.setdefault(source, {})
+
+
 def _merge_lcov(merged: dict[str, dict[int, int]], text: str, sources: dict[str, str]) -> None:
     counts: dict[int, int] | None = None
     for line in text.splitlines():
         if line.startswith("SF:"):
-            source = sources.get(os.path.realpath(line[3:]))
-            counts = None if source is None else merged.setdefault(source, {})
+            counts = _counts_for(merged, line[3:], sources)
         elif line.startswith("DA:") and counts is not None:
             number, hits = line[3:].split(",")[:2]
             counts[int(number)] = counts.get(int(number), 0) + int(hits)
         elif line == "end_of_record":
             counts = None
+
+
+def _line_counts(segments: list) -> dict[int, int]:
+    """Each executable line's count, as `llvm-cov`'s line coverage iterator gives it.
+
+    A segment is `[line, column, count, hasCount, isRegionEntry, isGapRegion]`.
+    A line is executable when a counted region starts on it, or when the
+    segment carried over from an earlier line has a count; its count is the
+    highest of those. A line that starts a skipped region is not executable.
+    """
+
+    counts: dict[int, int] = {}
+    if not segments:
+        return counts
+    by_line: dict[int, list] = {}
+    for segment in segments:
+        by_line.setdefault(segment[0], []).append(segment)
+    wrapped = None
+    for number in range(segments[0][0], segments[-1][0] + 1):
+        starting = by_line.get(number, [])
+        starts = [s for s in starting if s[3] and s[4] and not s[5]]
+        skipped = bool(starting) and not starting[0][3] and starting[0][4]
+        mapped = not skipped and (bool(wrapped and wrapped[3]) or bool(starts))
+        mapped = mapped or any(s[3] and s[4] for s in starting)
+        if mapped:
+            counts[number] = max([wrapped[2] if wrapped else 0, *(s[2] for s in starts)])
+        if starting:
+            wrapped = starting[-1]
+    return counts
+
+
+def _merge_export(merged: dict[str, dict[int, int]], export: Path, sources: dict[str, str]) -> None:
+    try:
+        data = json.loads(export.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        _warn(f"{export}: not a swift test coverage export ({exc}); skipped.")
+        return
+    if not isinstance(data, dict) or data.get("type") != _EXPORT_TYPE:
+        _warn(f"{export}: not a swift test coverage export (no type {_EXPORT_TYPE}); skipped.")
+        return
+    for unit in data.get("data", []):
+        for file in unit.get("files", []):
+            counts = _counts_for(merged, file["filename"], sources)
+            if counts is None:
+                continue
+            for number, hits in _line_counts(file.get("segments", [])).items():
+                counts[number] = counts.get(number, 0) + hits
 
 
 def _lcov_text(merged: dict[str, dict[int, int]]) -> str:
@@ -120,25 +180,11 @@ def _lcov_text(merged: dict[str, dict[int, int]]) -> str:
     return "\n".join(records) + "\n"
 
 
-def convert(root: Path, files: list[Path]) -> None:
-    """Replace `target/coverage/swift/lcov.info` with what the profiles record."""
-
-    folder = root / COVERAGE_DIR
-    remove_lcov(root)
-    profiles = _profiles(folder) if folder.is_dir() else []
-    if not profiles:
-        _warn(
-            f"No Xcode coverage profile (Build/ProfileData/*/*.profdata) in {folder}. "
-            "Pass -derivedDataPath target/coverage/swift/DerivedData. "
-            "Swift coverage will score 0%."
-        )
-        return
+def _merge_profiles(merged: dict[str, dict[int, int]], profiles: list[Path], sources: dict[str, str]) -> None:
     if shutil.which("xcrun") is None:
         names = ", ".join(str(profile) for profile in profiles)
         _warn(f"xcrun is not installed; skipping the Xcode coverage profiles {names}.")
         return
-    sources = _scored_sources(files)
-    merged: dict[str, dict[int, int]] = {}
     for profile in profiles:
         binaries = _binaries(profile)
         if not binaries:
@@ -147,5 +193,28 @@ def convert(root: Path, files: list[Path]) -> None:
         text = _export(profile, binaries)
         if text is not None:
             _merge_lcov(merged, text, sources)
+
+
+def convert(root: Path, files: list[Path]) -> None:
+    """Replace `target/coverage/swift/lcov.info` with what the profiles and exports record."""
+
+    folder = root / COVERAGE_DIR
+    remove_lcov(root)
+    profiles = _profiles(folder) if folder.is_dir() else []
+    exports = sorted(folder.glob("*.json")) if folder.is_dir() else []
+    if not profiles and not exports:
+        _warn(
+            f"No Xcode coverage profile (Build/ProfileData/*/*.profdata) and no swift test "
+            f"export (*.json) in {folder}. Pass -derivedDataPath target/coverage/swift/DerivedData "
+            "to xcodebuild, or copy the file swift test --show-codecov-path prints there. "
+            "Swift coverage will score 0%."
+        )
+        return
+    sources = _scored_sources(files)
+    merged: dict[str, dict[int, int]] = {}
+    if profiles:
+        _merge_profiles(merged, profiles, sources)
+    for export in exports:
+        _merge_export(merged, export, sources)
     if merged:
         lcov_path(root).write_text(_lcov_text(merged), encoding="utf-8")
