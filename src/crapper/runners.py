@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 from crapper.discover import DOTNET_BUILD_DIRS, SKIP_DIRS, is_test_file, language_of
+from crapper.languages import swift_coverage
 
 _MAVEN = [
     "mvn",
@@ -71,7 +72,7 @@ def _clean_dir(path: Path) -> None:
         shutil.rmtree(path)
 
 
-_COVERAGE_DIRS = {"typescript", "rust", "go", "python", "fsharp"}
+_COVERAGE_DIRS = {"typescript", "rust", "go", "python", "fsharp", "swift"}
 
 
 def _outside_language_dirs(coverage: Path, path: Path) -> bool:
@@ -708,6 +709,36 @@ def _cover_kotlin(root: Path, files: list[Path]) -> None:
             _warn(f"Kotlin coverage exited {code} in {build}. Kotlin coverage will score 0%.")
 
 
+_SWIFT_COMMAND = (
+    "rm -rf target/coverage/swift && xcodebuild test -workspace App.xcworkspace "
+    '-scheme App -destination "platform=iOS Simulator,name=iPhone 17" '
+    "-enableCodeCoverage YES -derivedDataPath target/coverage/swift/DerivedData"
+)
+
+
+def _cover_swift(root: Path) -> None:
+    """crapper never starts a Swift test run; without a command Swift scores 0%."""
+
+    swift_coverage.remove_lcov(root)
+    _warn(
+        "Swift coverage needs --coverage-command with an Xcode test command that keeps "
+        f"its derived data in {root / swift_coverage.COVERAGE_DIR}. "
+        "Swift coverage will score 0%. For example:\n"
+        f"  crapper --coverage-command '{_SWIFT_COMMAND}'"
+    )
+
+
+def _after_command(root: Path, files: list[Path], code: int) -> None:
+    """Convert Swift coverage after the command; a failed one leaves no Swift LCOV."""
+
+    if "swift" not in _languages_in(files):
+        return
+    if code == 0:
+        swift_coverage.convert(root, files)
+    else:
+        swift_coverage.remove_lcov(root)
+
+
 def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
     """Generate coverage reports for the languages present in `files`.
 
@@ -719,6 +750,7 @@ def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
     root = root.resolve()
     if command:
         code = run_shell(command, root)
+        _after_command(root, files, code)
         if code != 0:
             _warn(
                 f"Coverage command exited {code}. "
@@ -743,4 +775,6 @@ def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
         _cover_fsharp(root)
     if "kotlin" in languages:
         _cover_kotlin(root, files)
+    if "swift" in languages:
+        _cover_swift(root)
     return 0

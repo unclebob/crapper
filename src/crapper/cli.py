@@ -100,6 +100,16 @@ Coverage, when it is produced:
   F#           dotnet test Cobertura coverage, per .NET test project
   Kotlin       gradlew :koverXmlReport in the Gradle root, which must apply
                the Kover plugin; build/reports/kover/report.xml
+  Swift        only with --coverage-command: an Xcode test run with coverage
+               and its derived data in target/coverage/swift/, whose profile
+               crapper converts with llvm-cov to target/coverage/swift/lcov.info.
+               Example:
+               --coverage-command 'rm -rf target/coverage/swift &&
+                 xcodebuild test -workspace App.xcworkspace -scheme App \\
+                 -destination "platform=iOS Simulator,name=iPhone 17" \\
+                 -enableCodeCoverage YES \\
+                 -derivedDataPath target/coverage/swift/DerivedData'
+               Without the command, or when it exits non-zero, Swift scores 0%.
 
 uml-viewer joins .metrics/crap.edn on :namespace and :name.
   Clojure      the ns, and the defn name
