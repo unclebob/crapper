@@ -426,3 +426,49 @@ def test_an_interface_default_function_scores_from_the_interface_not_its_default
     )
     source = "package demo\n\ninterface Saved {\n    fun scoreOrNull(): Int? {\n        return null\n    }\n}\n"
     assert _kotlin_scores(tmp_path, source) == [("demo.Saved", "scoreOrNull", 100.0)]
+
+
+def _go_module(module_dir, module_line, profile_text):
+    module_dir.mkdir(parents=True, exist_ok=True)
+    (module_dir / "go.mod").write_text(f"{module_line}\n\ngo 1.21\n", encoding="utf-8")
+    profile = module_dir / "target" / "coverage" / "go" / "coverage.out"
+    profile.parent.mkdir(parents=True)
+    profile.write_text(profile_text, encoding="utf-8")
+
+
+def test_go_coverage_names_a_nested_file_by_its_module_import_path(tmp_path):
+    # `go test` keys a profile by import path. The module is `example.com/api`
+    # but its directory is `svc`, so no suffix of `svc/calc/calc.go` names it.
+    _go_module(
+        tmp_path / "svc",
+        "module example.com/api // the service",
+        "mode: set\n"
+        "example.com/api/calc/calc.go:4.2,4.11 1 1\n"
+        "example.com/api/calc/calc.go:5.3,6.1 1 0\n",
+    )
+    bundle = load_bundle(tmp_path)
+    scored = function(language="go", path="svc/calc/calc.go", start_line=3, end_line=7)
+    assert bundle.percent_for(scored) == 50.0
+
+
+def test_go_coverage_reads_a_quoted_module_path(tmp_path):
+    _go_module(
+        tmp_path / "cli",
+        'module "github.com/acme/tool"',
+        "mode: set\n"
+        "github.com/acme/tool/main.go:1.1,2.2 1 1\n"
+        "github.com/acme/tool/cmd/main.go:1.1,2.2 1 0\n",
+    )
+    bundle = load_bundle(tmp_path)
+    assert bundle.percent_for(function(language="go", path="cli/main.go", start_line=1, end_line=2)) == 100.0
+    assert bundle.percent_for(function(language="go", path="cli/cmd/main.go", start_line=1, end_line=2)) == 0.0
+
+
+def test_go_coverage_falls_back_to_the_path_without_a_module_name(tmp_path):
+    profile = tmp_path / "target" / "coverage" / "go" / "coverage.out"
+    profile.parent.mkdir(parents=True)
+    profile.write_text("mode: set\nproj/board.go:1.1,2.2 1 1\n", encoding="utf-8")
+    scored = function(language="go", path="board.go", start_line=1, end_line=2)
+    assert load_bundle(tmp_path).percent_for(scored) == 100.0
+    (tmp_path / "go.mod").write_text("go 1.21\n", encoding="utf-8")
+    assert load_bundle(tmp_path).percent_for(scored) == 100.0

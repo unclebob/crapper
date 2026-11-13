@@ -56,7 +56,7 @@ def run_shell(command: str | list[str], cwd: Path) -> int:
     return completed.returncode
 
 
-def _nearest(start: Path, marker: str, stop: Path) -> Path | None:
+def nearest_marker(start: Path, marker: str, stop: Path) -> Path | None:
     current = start if start.is_dir() else start.parent
     stop = stop.resolve()
     while True:
@@ -216,7 +216,7 @@ def typescript_packages(root: Path, files: list[Path]) -> list[Path]:
     for file in files:
         if language_of(file) != "typescript":
             continue
-        package = _nearest(file, "package.json", root)
+        package = nearest_marker(file, "package.json", root)
         if package is not None:
             packages.add(package.resolve())
     return sorted(packages)
@@ -332,7 +332,7 @@ def python_roots(root: Path, files: list[Path]) -> list[Path]:
             continue
         module = None
         for marker in _PYTHON_MARKERS:
-            module = _nearest(Path(file), marker, root)
+            module = nearest_marker(Path(file), marker, root)
             if module is not None:
                 break
         found.add((module or root).resolve())
@@ -432,7 +432,7 @@ def _modules_with(files: list[Path], suffix: str, marker: str, root: Path) -> li
     for file in files:
         if Path(file).suffix != suffix:
             continue
-        module = _nearest(file, marker, root)
+        module = nearest_marker(file, marker, root)
         if module is not None:
             modules.add(module)
     return sorted(modules)
@@ -657,7 +657,7 @@ def _gradle_roots(root: Path, files: list[Path]) -> list[Path]:
         if Path(file).suffix != ".kt":
             continue
         for marker in _GRADLE_SETTINGS:
-            build = _nearest(Path(file), marker, root)
+            build = nearest_marker(Path(file), marker, root)
             if build is not None:
                 found.add(build.resolve())
                 break
