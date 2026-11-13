@@ -4,7 +4,8 @@ Decision points follow the same structural rule as the other languages:
 `if`, `elif`, `for`, `while`, `except`, each `match` case, a comprehension
 filter, a conditional expression, and each `and` / `or`. Module-level
 functions and class methods are entries. A nested function stays inside the
-enclosing function. A class method's namespace is `module.Class`.
+enclosing function. A class method's namespace is `module.Class`. Coverage
+starts at the first line of the body: Python runs the `def` line on import.
 """
 
 from crapper.languages.treesitter import (
@@ -89,6 +90,13 @@ def _is_nested_function(node) -> bool:
     return False
 
 
+def _body_line(node) -> int:
+    body = node.child_by_field_name("body")
+    if body is None:
+        return start_line(node)
+    return start_line(body)
+
+
 def _class_names(data: bytes, node) -> list[str]:
     names: list[str] = []
     current = node.parent
@@ -128,6 +136,7 @@ def functions_in_source(
                 end_line=end_line(node),
                 path=path,
                 language="python",
+                body_line=_body_line(node),
             )
         )
     return found

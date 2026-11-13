@@ -7,6 +7,8 @@ from crapper.coverage import (
     parse_jacoco_index,
     parse_lcov,
 )
+from crapper.crap import make_entry
+from crapper.languages.python import functions_in_source as python_functions
 from crapper.model import Function
 
 
@@ -40,6 +42,20 @@ def test_lcov_percentage_when_there_is_no_html():
     bundle = CoverageBundle(lcov=lcov)
     assert bundle.percent_for(function(start_line=3, end_line=4)) == 50.0
     assert bundle.percent_for(function(path="src/missing.clj")) is None
+
+
+def test_a_python_def_line_hit_on_import_does_not_cover_the_function():
+    source = "def never_called(x):\n    return x + 1\n\n\ndef called(x):\n    return x * 2\n"
+    lcov = parse_lcov("SF:src/demo/cov.py\nDA:1,1\nDA:2,0\nDA:5,1\nDA:6,1\nend_of_record\n")
+    bundle = CoverageBundle(lcov=lcov)
+    entries = [
+        make_entry(fn, bundle.percent_for(fn))
+        for fn in python_functions(source, "src/demo/cov.py", None)
+    ]
+    assert [(entry.name, entry.coverage, entry.crap) for entry in entries] == [
+        ("never_called", 0.0, 2.0),
+        ("called", 100.0, 1.0),
+    ]
 
 
 def test_lcov_branch_records_override_line_hits():

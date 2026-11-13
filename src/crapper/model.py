@@ -17,6 +17,11 @@ class Function:
     # Mutator uses the span to give a nested handler the sites inside it.
     start_byte: int = -1
     end_byte: int = -1
+    # First line of the body. -1 when the language does not record it.
+    # Coverage starts here, so a line that runs when the function is defined
+    # (Python's `def`) does not count as a test reaching it. Mutator still
+    # binds sites from start_line.
+    body_line: int = -1
 
 
 @dataclass(frozen=True)
