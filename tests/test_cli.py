@@ -48,8 +48,6 @@ def test_kotlin_sources_are_kotlin_and_gradle_scripts_are_not_scored():
 def test_swift_sources_are_swift_and_manifests_tests_and_build_folders_are_not_scored():
     assert language_of("Pool/Sources/Pool/PoolView.swift") == "swift"
     assert language_of("Pool/Package.swift") is None
-    for folder in (".build", "Pods", "Carthage", "DerivedData"):
-        assert language_of(f"App/{folder}/Lib/Lib.swift") is None
     assert is_test_file("Pool/Tests/PoolTests/PoolViewTests.swift") is True
     assert is_test_file("App/AppUITests/LaunchTests.swift") is True
     assert is_test_file("Pool/Sources/Pool/PoolView.swift") is False
@@ -338,6 +336,26 @@ def test_changed_selection_skips_swift_manifests_tests_and_build_folders(tmp_pat
     monkeypatch.setattr("crapper.cli.subprocess.run", _git_status(tmp_path, status))
     assert run(["--root", str(tmp_path), "--no-coverage", "--changed"]) == 0
     text = (tmp_path / ".metrics" / "crap.edn").read_text(encoding="utf-8")
+    assert ':name "kept"' in text
+    assert text.count(":name ") == 1
+
+
+@pytest.mark.parametrize("outer", ["Pods", "DerivedData"])
+def test_changed_selection_keeps_swift_files_of_a_project_inside_a_build_folder_name(
+    tmp_path, monkeypatch, outer
+):
+    root = tmp_path / outer / "MyApp"
+    changed = {
+        "Sources/App/App.swift": "struct App {\n    func kept() {}\n}\n",
+        "Pods/Lib/Lib.swift": "func fromPods() {}\n",
+        ".build/checkouts/Dep.swift": "func fromBuild() {}\n",
+    }
+    for relative, text in changed.items():
+        _write(root, relative, text)
+    status = "".join(f"?? {relative}\0" for relative in changed)
+    monkeypatch.setattr("crapper.cli.subprocess.run", _git_status(root, status))
+    assert run(["--root", str(root), "--no-coverage", "--changed"]) == 0
+    text = (root / ".metrics" / "crap.edn").read_text(encoding="utf-8")
     assert ':name "kept"' in text
     assert text.count(":name ") == 1
 

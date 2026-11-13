@@ -842,3 +842,19 @@ def test_clean_clojure_leaves_the_swift_folder_untouched(tmp_path):
     _clean_clojure(tmp_path)
     assert lcov.is_file()
     assert profile.is_file()
+
+
+def test_clean_clojure_leaves_empty_folders_and_html_inside_language_folders(tmp_path):
+    coverage = tmp_path / "target" / "coverage"
+    empty = coverage / "swift" / "DerivedData" / "Logs" / "Test"
+    empty.mkdir(parents=True)
+    page = coverage / "swift" / "DerivedData" / "Docs" / "index.html"
+    page.parent.mkdir(parents=True)
+    page.write_text("<html></html>", encoding="utf-8")
+    stale = coverage / "demo" / "core.clj.html"
+    stale.parent.mkdir(parents=True)
+    stale.write_text("x", encoding="utf-8")
+    _clean_clojure(tmp_path)
+    assert empty.is_dir()
+    assert page.is_file()
+    assert not stale.parent.exists()

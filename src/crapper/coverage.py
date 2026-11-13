@@ -12,6 +12,7 @@ or `swift test` exports by `crapper.languages.swift_coverage` before the loader 
 from __future__ import annotations
 
 import functools
+import os
 import re
 import sys
 import xml.etree.ElementTree as ET
@@ -591,8 +592,27 @@ def _read(path: Path) -> str | None:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
+# Swift's coverage folder holds Xcode's derived data, a large tree whose own
+# files are not reports; only the LCOV file the converter writes at its top
+# is read.
+_SWIFT_COVERAGE_DIR = "swift"
+
+
+def _coverage_files(coverage_dir: Path, wanted) -> list[Path]:
+    """Files under `target/coverage` whose name is `wanted`, not below the Swift folder."""
+
+    swift = coverage_dir / _SWIFT_COVERAGE_DIR
+    found: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(coverage_dir):
+        folder = Path(dirpath)
+        if folder == swift:
+            dirnames.clear()
+        found.extend(folder / name for name in filenames if wanted(name))
+    return found
+
+
 def _lcov_paths(root: Path) -> list[Path]:
-    paths = list(root.glob("target/coverage/**/lcov.info"))
+    paths = _coverage_files(root / "target" / "coverage", lambda name: name == "lcov.info")
     paths.extend(root.glob("coverage/**/lcov.info"))
     return paths
 
@@ -675,7 +695,7 @@ def _merge_forms(root: Path) -> dict[str, dict[int, tuple[int, int]]]:
     found: dict[str, dict[int, tuple[int, int]]] = {}
     if not coverage_dir.is_dir():
         return found
-    for html_path in coverage_dir.rglob("*.html"):
+    for html_path in _coverage_files(coverage_dir, lambda name: name.endswith(".html")):
         text = _read(html_path)
         if not text or "forms covered" not in text:
             continue

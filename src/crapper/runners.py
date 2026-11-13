@@ -75,25 +75,30 @@ def _clean_dir(path: Path) -> None:
 _COVERAGE_DIRS = {"typescript", "rust", "go", "python", "fsharp", "swift"}
 
 
-def _outside_language_dirs(coverage: Path, path: Path) -> bool:
-    relative = path.relative_to(coverage)
-    if path.name in _COVERAGE_DIRS:
-        return False
-    return not _COVERAGE_DIRS.intersection(relative.parts)
+def _walk_outside_language_dirs(coverage: Path):
+    """Each folder under `coverage` with its file names, never entering a language folder.
+
+    A language folder is skipped at any depth, and Swift's holds Xcode's
+    derived data, so it is not walked at all.
+    """
+
+    for dirpath, dirnames, filenames in os.walk(coverage):
+        dirnames[:] = [name for name in dirnames if name not in _COVERAGE_DIRS]
+        yield Path(dirpath), filenames
 
 
 def _remove_cloverage_html(coverage: Path) -> None:
-    for path in coverage.rglob("*.html"):
-        if not _outside_language_dirs(coverage, path):
-            continue
-        path.unlink()
+    for folder, filenames in _walk_outside_language_dirs(coverage):
+        for name in filenames:
+            if name.endswith(".html"):
+                (folder / name).unlink()
 
 
 def _remove_empty_dirs(coverage: Path) -> None:
-    directories = [path for path in coverage.rglob("*") if path.is_dir()]
+    directories = [
+        folder for folder, _files in _walk_outside_language_dirs(coverage) if folder != coverage
+    ]
     for path in sorted(directories, reverse=True):
-        if not _outside_language_dirs(coverage, path):
-            continue
         try:
             path.rmdir()
         except OSError:

@@ -82,15 +82,21 @@ def language_of(path: str | Path) -> str | None:
     if name.endswith(".d.ts"):
         return None
     language = EXTENSIONS.get(file_path.suffix)
-    if language == "swift" and _is_swift_manifest_or_build_output(file_path):
+    if language == "swift" and name == SWIFT_MANIFEST:
         return None
     return language
 
 
-def _is_swift_manifest_or_build_output(path: Path) -> bool:
-    """`Package.swift`, and files under `.build`, `Pods`, `Carthage`, or `DerivedData`."""
+def is_swift_build_output(path: Path, root: Path) -> bool:
+    """A Swift file under `.build`, `Pods`, `Carthage`, or `DerivedData` below `root`.
 
-    return path.name == SWIFT_MANIFEST or any(part in SWIFT_BUILD_DIRS for part in path.parts)
+    Only the folders below the project root count, so a project that itself
+    lives inside a folder with one of those names keeps its files.
+    """
+
+    return language_of(path) == "swift" and any(
+        part in SWIFT_BUILD_DIRS for part in path.relative_to(root).parts[:-1]
+    )
 
 
 def is_test_file(path: str | Path) -> bool:
@@ -150,7 +156,7 @@ def _is_build_output(path: Path) -> bool:
 def _is_scored(path: Path, root: Path) -> bool:
     if language_of(path) is None or is_test_file(path):
         return False
-    return not _is_build_output(path.relative_to(root))
+    return not _is_build_output(path.relative_to(root)) and not is_swift_build_output(path, root)
 
 
 def _walk(root: Path) -> list[Path]:

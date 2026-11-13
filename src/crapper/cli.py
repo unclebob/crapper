@@ -22,6 +22,7 @@ from crapper.discover import (
     SWIFT_MANIFEST,
     SWIFT_TEST_DIR_SUFFIX,
     TEST_DIRS,
+    is_swift_build_output,
     is_test_file,
     iter_source_files,
     language_of,
@@ -394,7 +395,9 @@ def _changed_source(root: Path) -> list[Path]:
     return [
         path
         for path in _changed_files(root)
-        if language_of(path) is not None and not is_test_file(path)
+        if language_of(path) is not None
+        and not is_test_file(path)
+        and not is_swift_build_output(path, root)
     ]
 
 

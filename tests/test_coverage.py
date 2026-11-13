@@ -161,6 +161,24 @@ def test_load_bundle_merges_each_report(tmp_path):
     assert bundle.jacoco is not None
 
 
+def test_load_bundle_reads_swifts_lcov_but_nothing_below_the_swift_folder(tmp_path):
+    coverage = tmp_path / "target" / "coverage"
+    swift = coverage / "swift"
+    stray = swift / "DerivedData" / "SourcePackages" / "checkouts" / "Dep"
+    stray.mkdir(parents=True)
+    (swift / "lcov.info").write_text("SF:/app/App.swift\nDA:1,1\nend_of_record\n", encoding="utf-8")
+    (stray / "lcov.info").write_text("SF:/dep/Dep.swift\nDA:1,1\nend_of_record\n", encoding="utf-8")
+    forms = '<span title="1 out of 2 forms covered">   4&nbsp;&nbsp;(if x 1)</span>'
+    (stray / "index.html").write_text(forms, encoding="utf-8")
+    (swift / "report.html").write_text(forms, encoding="utf-8")
+    rust = coverage / "rust" / "nested"
+    rust.mkdir(parents=True)
+    (rust / "lcov.info").write_text("SF:src/lib.rs\nDA:1,1\nend_of_record\n", encoding="utf-8")
+    bundle = load_bundle(tmp_path)
+    assert sorted(bundle.lcov) == ["/app/App.swift", "src/lib.rs"]
+    assert bundle.form_html == {"swift/report": {4: (1, 2)}}
+
+
 def _cobertura(filename, lines, name="Demo.Board"):
     """One Cobertura report with one class; `lines` are (number, hits, "covered/total" or None)."""
 
