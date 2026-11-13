@@ -4,8 +4,8 @@ Clojure prefers Cloverage's per-line form counts, then LCOV. Java uses JaCoCo
 instruction counters, and Kotlin the same counters from Kover's JaCoCo-shaped
 report. Go uses statement profiles. Cobertura reports join the
 LCOV index. LCOV scores a function by its BRDA branch records when it has any,
-and by line hits otherwise. Swift's LCOV is converted from Xcode's
-profile data by `crapper.languages.swift_coverage` before the loader runs.
+and by line hits otherwise. Swift's LCOV is converted from Xcode profile data
+or `swift test` exports by `crapper.languages.swift_coverage` before the loader runs.
 `percent_for` returns None when the file is absent; analysis turns that into 0%.
 """
 

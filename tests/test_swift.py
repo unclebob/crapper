@@ -1,3 +1,5 @@
+import pytest
+
 from crapper.languages.swift import functions_in_source
 
 
@@ -277,6 +279,30 @@ struct Paging<Data, Content> {
     assert found == [("init", 3, 7, 2), ("after", 9, 9, 1)]
 
 
+@pytest.mark.parametrize(
+    "parameters",
+    [
+        'x: String = ")", y: String = "\\")", z: String = \"\"\"\n    )\n    \"\"\"',
+        'p: String = #"C:\\"#',
+        'p: String = #")"#',
+        'a: Int, // the "x\n        p: String',
+        'a: Int /* ")" */, p: String',
+    ],
+)
+def test_a_parenthesis_in_a_string_or_comment_keeps_the_initializer_where_clause_blanked(parameters):
+    source = f"""
+struct S {{
+    init<T: P, U>({parameters}) where T: P,
+        U: Q {{
+        if x.isEmpty {{}}
+    }}
+    func g() {{}}
+}}
+"""
+    found = [(fn.namespace, fn.name, fn.complexity) for fn in functions_in_source(source, "Sources/M/S.swift", "/proj")]
+    assert found == [("M.S", "init", 2), ("M.S", "g", 1)]
+
+
 def test_a_where_clause_outside_an_initializer_is_left_as_written():
     source = """
 extension Array where Element == Int {
@@ -303,3 +329,24 @@ extension Board {
 """
     (found,) = functions_in_source(source, "Board.swift", "/proj")
     assert (found.name, found.complexity) == ("init", 3)
+
+
+def test_an_extension_of_a_sugared_type_takes_the_standard_library_name():
+    source = """
+extension [Int] {
+    func total() -> Int { 0 }
+}
+
+extension [String: Int] {
+    func keys() -> Int { 0 }
+}
+
+extension Int? {
+    func orZero() -> Int { 0 }
+}
+"""
+    assert entries(source, "Pool/Sources/Pool/Sugar.swift") == [
+        ("Pool.Array", "total"),
+        ("Pool.Dictionary", "keys"),
+        ("Pool.Optional", "orZero"),
+    ]

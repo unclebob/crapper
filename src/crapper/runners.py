@@ -709,17 +709,6 @@ def _cover_kotlin(root: Path, files: list[Path]) -> None:
             _warn(f"Kotlin coverage exited {code} in {build}. Kotlin coverage will score 0%.")
 
 
-_SWIFT_COMMAND = (
-    "rm -rf target/coverage/swift && xcodebuild test -workspace App.xcworkspace "
-    '-scheme App -destination "platform=iOS Simulator,name=iPhone 17" '
-    "-enableCodeCoverage YES -derivedDataPath target/coverage/swift/DerivedData"
-)
-_SWIFT_PACKAGE_COMMAND = (
-    "rm -rf target/coverage/swift && mkdir -p target/coverage/swift && "
-    'swift test --enable-code-coverage && cp "$(swift test --show-codecov-path)" target/coverage/swift/'
-)
-
-
 def _cover_swift(root: Path) -> None:
     """crapper never starts a Swift test run; without a command Swift scores 0%."""
 
@@ -728,9 +717,9 @@ def _cover_swift(root: Path) -> None:
         "Swift coverage needs --coverage-command with an Xcode or swift test command that "
         f"leaves its coverage in {root / swift_coverage.COVERAGE_DIR}. "
         "Swift coverage will score 0%. For example, for an Xcode project:\n"
-        f"  crapper --coverage-command '{_SWIFT_COMMAND}'\n"
+        f"  crapper --coverage-command '{swift_coverage.XCODE_COMMAND}'\n"
         "or for a Swift package:\n"
-        f"  crapper --coverage-command '{_SWIFT_PACKAGE_COMMAND}'"
+        f"  crapper --coverage-command '{swift_coverage.PACKAGE_COMMAND}'"
     )
 
 

@@ -59,7 +59,7 @@ uml-viewer groups entries by `:namespace` and joins each operation on `:name`. `
 | Python | the dotted module path, or `module.Class` | the function or method name |
 | F# | the `namespace` and `module` path, or `Namespace.Module.Type` | the function, member, or active pattern name |
 | Kotlin | the `package`, or `package.Class` (`package.Outer.Inner`, `package.Class.Companion`, `package.Enum.VALUE`) | the function name |
-| Swift | `Module.Type` (`Module.Outer.Inner`; an extension as the type it extends) when the path has `Sources/<Module>/`, otherwise `Type`; a top-level function takes `Module`, or the file stem | the function or property name, `init`, `deinit`, or `subscript` |
+| Swift | `Module.Type` (`Module.Outer.Inner`; an extension as the type it extends, `[T]`, `[K: V]`, and `T?` as `Array`, `Dictionary`, and `Optional`) when the path has `Sources/<Module>/`, otherwise `Type`; a top-level function takes `Module`, or the file stem | the function or property name, `init`, `deinit`, or `subscript` |
 
 Rename or move is a new entry. There is no identity matching across runs.
 

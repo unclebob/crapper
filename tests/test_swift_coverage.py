@@ -34,10 +34,29 @@ def _record(path: Path | str, lines: dict[int, int]) -> str:
     return f"SF:{path}\nFN:2,place\nFNDA:1,place\n{body}LF:{len(lines)}\nLH:0\nend_of_record\n"
 
 
-def _fake_llvm_cov(monkeypatch, exports: dict[Path, str], calls: list | None = None):
-    """`xcrun` is on the PATH and prints `exports[profile]` for each profile."""
+def _lipo(command, archs: dict[str, str]):
+    """`xcrun lipo -archs` lists each binary's slices: `archs[name]`, or one arm64 slice.
+
+    An empty `archs[name]` is a file lipo cannot read.
+    """
+
+    if command[:2] != ["xcrun", "lipo"]:
+        return None
+    found = archs.get(Path(command[-1]).name, "arm64")
+    if not found:
+        return subprocess.CompletedProcess(command, 1, stdout="", stderr="can't figure out the architecture")
+    return subprocess.CompletedProcess(command, 0, stdout=found + "\n")
+
+
+def _fake_llvm_cov(
+    monkeypatch, exports: dict[Path, str], calls: list | None = None, archs: dict[str, str] | None = None
+):
+    """`xcrun` is on the PATH and `llvm-cov` prints `exports[profile]` for each profile."""
 
     def run(command, **_kwargs):
+        lipo = _lipo(command, archs or {})
+        if lipo is not None:
+            return lipo
         if calls is not None:
             calls.append(command)
         profile = Path(command[command.index("-instr-profile") + 1])
@@ -100,16 +119,21 @@ def test_absolute_paths_are_kept_and_score_the_function_they_name(tmp_path, monk
     }
 
 
+def _llvm_cov_calls(tmp_path, monkeypatch, archs: dict[str, str]) -> tuple[list, Path, Path]:
+    board = _write(tmp_path, "Board.swift")
+    profile = _derived_data(tmp_path)
+    calls = []
+    _fake_llvm_cov(monkeypatch, {profile: _record(board, {1: 1})}, calls, archs)
+    convert(tmp_path, [board])
+    return calls, profile, profile.parents[2] / "Products" / "Debug-iphonesimulator"
+
+
 def test_llvm_cov_reads_each_profile_against_the_test_bundles_and_apps_built_beside_it(
     tmp_path, monkeypatch
 ):
-    board = _write(tmp_path, "Board.swift")
-    profile = _derived_data(tmp_path)
-    products = profile.parents[2] / "Products" / "Debug-iphonesimulator"
-    calls = []
-    _fake_llvm_cov(monkeypatch, {profile: _record(board, {1: 1})}, calls)
-    monkeypatch.setattr("crapper.languages.swift_coverage.platform.machine", lambda: "arm64")
-    convert(tmp_path, [board])
+    # llvm-cov pairs the -arch options with the binaries in order, so each
+    # binary names its own; it refuses a universal binary without one.
+    calls, profile, products = _llvm_cov_calls(tmp_path, monkeypatch, {})
     assert calls == [
         [
             "xcrun", "llvm-cov", "export", "-format=lcov", "-skip-functions",
@@ -122,6 +146,33 @@ def test_llvm_cov_reads_each_profile_against_the_test_bundles_and_apps_built_bes
             "-arch=arm64",
         ]
     ]
+
+
+def test_each_binary_names_arm64_when_it_has_that_slice_and_its_first_slice_otherwise(
+    tmp_path, monkeypatch
+):
+    archs = {"PoolTests": "x86_64", "Tyche": "x86_64 arm64", "TycheTests": "x86_64 i386"}
+    calls, _profile, _products = _llvm_cov_calls(tmp_path, monkeypatch, archs)
+    assert [part for part in calls[0] if part.startswith("-arch")] == [
+        "-arch=x86_64", "-arch=arm64", "-arch=arm64", "-arch=x86_64",
+    ]
+
+
+def test_a_universal_binary_with_one_slice_names_it(tmp_path, monkeypatch):
+    # Xcode's UI test runner is a universal binary whose only slice is arm64:
+    # lipo lists one architecture, as for a thin binary, and llvm-cov still
+    # refuses it without -arch.
+    runner = _write(tmp_path, "target/coverage/swift/DerivedData/Build/Products/Debug-iphonesimulator/"
+                    "TycheUITests-Runner.app/TycheUITests-Runner", "binary")
+    calls, _profile, _products = _llvm_cov_calls(tmp_path, monkeypatch, {"TycheUITests-Runner": "arm64"})
+    assert calls[0][calls[0].index(str(runner)) + 1] == "-arch=arm64"
+
+
+def test_a_binary_lipo_cannot_read_leaves_every_binary_without_an_arch(tmp_path, monkeypatch, capsys):
+    calls, _profile, products = _llvm_cov_calls(tmp_path, monkeypatch, {"Tyche.debug.dylib": ""})
+    assert calls and not [part for part in calls[0] if part.startswith("-arch")]
+    err = capsys.readouterr().err
+    assert f"architecture of {products / 'Tyche.app' / 'Tyche.debug.dylib'};" in err
 
 
 def test_without_xcrun_xcode_inputs_are_skipped_with_a_warning(tmp_path, monkeypatch, capsys):
@@ -146,6 +197,9 @@ def test_a_profile_llvm_cov_cannot_read_is_skipped_with_a_warning(tmp_path, monk
     good = _derived_data(tmp_path, device="GOOD")
 
     def run(command, **_kwargs):
+        lipo = _lipo(command, {})
+        if lipo is not None:
+            return lipo
         if str(broken) in command:
             return subprocess.CompletedProcess(command, 1, stdout="", stderr="malformed profile")
         return subprocess.CompletedProcess(command, 0, stdout=_record(board, {1: 1}), stderr="")
@@ -231,7 +285,7 @@ def _swift_test_export(root: Path, name: str, files: list[dict]) -> Path:
     return _write(root, f"target/coverage/swift/{name}", json.dumps(export))
 
 
-def test_an_export_converts_each_line_as_its_summary_counts_it(tmp_path, monkeypatch):
+def test_an_export_converts_each_line_as_llvm_cov_counts_it(tmp_path, monkeypatch):
     grade = _write(tmp_path, "Sources/Scratch/Grade.swift")
     entry_point = tmp_path / ".build/out/DerivedSources/test_entry_point.swift"
     _swift_test_export(
@@ -253,8 +307,6 @@ def test_an_export_converts_each_line_as_its_summary_counts_it(tmp_path, monkeyp
             17: (0, 1), 18: (0, 1), 19: (0, 1), 20: (0, 1), 21: (0, 1), 22: (0, 1),
         }
     }
-    lines = converted[str(grade)].values()
-    assert (len(lines), sum(covered for covered, _ in lines)) == (11, 5)
 
 
 def test_a_file_in_an_export_and_in_an_xcode_profile_is_covered_where_either_covers_it(
@@ -303,3 +355,21 @@ def test_a_json_file_that_is_not_a_coverage_export_is_skipped_with_a_warning(
     assert str(broken) in err
     assert str(export) not in err
     assert _converted(tmp_path) == {str(grade): {2: (1, 1)}}
+
+
+def test_an_export_of_an_unexpected_shape_is_skipped_whole_with_a_warning(tmp_path, monkeypatch, capsys):
+    grade = _write(tmp_path, "Sources/Scratch/Grade.swift")
+    good = _export_file(grade, _GRADE_SEGMENTS[:2], 1, 1)
+    # Each one reads a file of grade's before the part it does not expect.
+    _swift_test_export(tmp_path, "nameless.json", [good, {"segments": []}])
+    _swift_test_export(tmp_path, "short.json", [good, _export_file(grade, [[3, 1]], 1, 0)])
+    unit = {"type": "llvm.coverage.json.export", "data": [{"files": [good]}, "not a unit"]}
+    _write(tmp_path, "target/coverage/swift/unit.json", json.dumps(unit))
+    _swift_test_export(tmp_path, "Scratch.json", [good])
+    monkeypatch.setattr("crapper.languages.swift_coverage.shutil.which", lambda name: None)
+    convert(tmp_path, [grade])
+    err = capsys.readouterr().err
+    for name in ("nameless.json", "short.json", "unit.json"):
+        assert f"{name}: not a swift test coverage export" in err
+    assert "Scratch.json" not in err
+    assert lcov_path(tmp_path).read_text() == f"SF:{grade}\nDA:2,2\nend_of_record\n"

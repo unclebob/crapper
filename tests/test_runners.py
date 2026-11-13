@@ -768,19 +768,16 @@ def test_kotlin_without_gradle_settings_skips_kotlin_coverage(tmp_path, monkeypa
 
 
 def _swift_project(root: Path) -> tuple[Path, Path, Path]:
-    """A Swift source, the derived data and result bundle a command left, and an earlier LCOV file."""
+    """A Swift source, the profile a command left in its derived data, and an earlier LCOV file."""
 
     source = _write(root, "Pool/Sources/Pool/Board.swift", "func place() {}\n")
-    _write(root, "target/coverage/swift/DerivedData/Build/ProfileData/SIM/Coverage.profdata", "p")
-    bundle = root / "target" / "coverage" / "swift" / "Tyche.xcresult"
-    (bundle / "Data").mkdir(parents=True)
-    _write(bundle, "Info.plist", "<plist/>\n")
+    profile = _write(root, "target/coverage/swift/DerivedData/Build/ProfileData/SIM/Coverage.profdata", "p")
     lcov = _write(root, "target/coverage/swift/lcov.info", f"SF:{source}\nDA:1,1\nend_of_record\n")
-    return source, bundle, lcov
+    return source, profile, lcov
 
 
 def test_a_coverage_command_that_exits_zero_converts_swift_coverage(tmp_path, monkeypatch):
-    source, _bundle, _lcov = _swift_project(tmp_path)
+    source, _profile, _lcov = _swift_project(tmp_path)
     converted = []
     monkeypatch.setattr("crapper.runners.run_shell", lambda command, cwd: 0)
     monkeypatch.setattr(
@@ -793,7 +790,7 @@ def test_a_coverage_command_that_exits_zero_converts_swift_coverage(tmp_path, mo
 def test_a_failed_coverage_command_converts_nothing_and_removes_the_old_swift_lcov(
     tmp_path, monkeypatch
 ):
-    source, bundle, lcov = _swift_project(tmp_path)
+    source, profile, lcov = _swift_project(tmp_path)
     converted = []
     monkeypatch.setattr("crapper.runners.run_shell", lambda command, cwd: 65)
     monkeypatch.setattr(
@@ -802,13 +799,13 @@ def test_a_failed_coverage_command_converts_nothing_and_removes_the_old_swift_lc
     assert run_coverage(tmp_path, [source], "xcodebuild test") == 65
     assert converted == []
     assert not lcov.exists()
-    assert bundle.is_dir()
+    assert profile.is_file()
     entries = analyze_files([source], tmp_path, load_bundle(tmp_path))
     assert [entry.coverage for entry in entries] == [0.0]
 
 
 def test_a_coverage_command_without_swift_files_converts_nothing(tmp_path, monkeypatch):
-    _source, _bundle, lcov = _swift_project(tmp_path)
+    _source, _profile, lcov = _swift_project(tmp_path)
     go = _write(tmp_path, "main.go", "package main\n")
     monkeypatch.setattr("crapper.runners.run_shell", lambda command, cwd: 0)
     monkeypatch.setattr(
@@ -819,10 +816,10 @@ def test_a_coverage_command_without_swift_files_converts_nothing(tmp_path, monke
     assert lcov.is_file()
 
 
-def test_without_a_command_swift_warns_removes_its_lcov_and_keeps_the_bundles(
+def test_without_a_command_swift_warns_removes_its_lcov_and_keeps_the_derived_data(
     tmp_path, monkeypatch, capsys
 ):
-    source, bundle, lcov = _swift_project(tmp_path)
+    source, profile, lcov = _swift_project(tmp_path)
     seen = []
     monkeypatch.setattr("crapper.runners.run_shell", lambda command, cwd: seen.append(command) or 0)
     assert run_coverage(tmp_path, [source], None) == 0
@@ -835,17 +832,13 @@ def test_without_a_command_swift_warns_removes_its_lcov_and_keeps_the_bundles(
     assert "swift test --show-codecov-path" in err
     assert "Swift coverage will score 0%" in err
     assert not lcov.exists()
-    assert (bundle / "Info.plist").is_file()
-    assert (bundle / "Data").is_dir()
-    assert (tmp_path / "target/coverage/swift/DerivedData/Build/ProfileData/SIM/Coverage.profdata").is_file()
+    assert profile.is_file()
     entries = analyze_files([source], tmp_path, load_bundle(tmp_path))
     assert [entry.coverage for entry in entries] == [0.0]
 
 
 def test_clean_clojure_leaves_the_swift_folder_untouched(tmp_path):
-    _source, bundle, lcov = _swift_project(tmp_path)
-    _write(bundle, "Data/report.html", "<html></html>\n")
+    _source, profile, lcov = _swift_project(tmp_path)
     _clean_clojure(tmp_path)
     assert lcov.is_file()
-    assert (bundle / "Data" / "report.html").is_file()
-    assert (bundle / "Data").is_dir()
+    assert profile.is_file()

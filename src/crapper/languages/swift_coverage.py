@@ -1,8 +1,7 @@
 """Convert Swift coverage in `target/coverage/swift/` to one LCOV file.
 
 The user's `--coverage-command` runs Xcode's tests with code coverage and its
-derived data inside that folder (`-derivedDataPath
-target/coverage/swift/DerivedData`). Each profile it leaves
+derived data inside that folder, as `XCODE_COMMAND` does. Each profile it leaves
 (`Build/ProfileData/<device>/*.profdata`) is read with
 `xcrun llvm-cov export -format=lcov` against the test bundles and apps built
 next to it, which also holds the packages linked into them; `xccov` reports
@@ -16,17 +15,16 @@ the Xcode inputs are skipped with a warning.
 
 A `swift test --enable-code-coverage` run instead leaves a JSON export, which
 the command copies into the folder from the path `swift test
---show-codecov-path` prints. Its per-line counts are derived from each file's
-segments the way `llvm-cov` derives its own LCOV lines, and merged into the
-same file; exports need no `xcrun`. A JSON file that is not a coverage export
-is skipped with a warning.
+--show-codecov-path` prints, as `PACKAGE_COMMAND` does. Its per-line counts
+are derived from each file's segments the way `llvm-cov` derives its own LCOV
+lines, and merged into the same file; exports need no `xcrun`. A JSON file that is not a coverage export
+is skipped with a warning, and so is an export of an unexpected shape.
 """
 
 from __future__ import annotations
 
 import json
 import os
-import platform
 import shutil
 import subprocess
 import sys
@@ -35,6 +33,16 @@ from pathlib import Path
 from crapper.discover import language_of
 
 COVERAGE_DIR = Path("target") / "coverage" / "swift"
+DERIVED_DATA = COVERAGE_DIR / "DerivedData"
+XCODE_COMMAND = (
+    f"rm -rf {COVERAGE_DIR.as_posix()} && xcodebuild test -workspace App.xcworkspace "
+    '-scheme App -destination "platform=iOS Simulator,name=iPhone 17" '
+    f"-enableCodeCoverage YES -derivedDataPath {DERIVED_DATA.as_posix()}"
+)
+PACKAGE_COMMAND = (
+    f"rm -rf {COVERAGE_DIR.as_posix()} && mkdir -p {COVERAGE_DIR.as_posix()} && "
+    f'swift test --enable-code-coverage && cp "$(swift test --show-codecov-path)" {COVERAGE_DIR.as_posix()}/'
+)
 _PROFILES = ("Build/ProfileData/*/*.profdata", "*/Build/ProfileData/*/*.profdata")
 _BINARIES = ("*/*.xctest", "*/*.app", "*/*.app/PlugIns/*.xctest")
 _EXPORT_TYPE = "llvm.coverage.json.export"
@@ -85,17 +93,41 @@ def _binaries(profile: Path) -> list[Path]:
     return [binary for bundle in bundles for binary in _bundle_binaries(bundle)]
 
 
-def _export(profile: Path, binaries: list[Path]) -> str | None:
-    """One `-arch` per binary picks this machine's slice of a universal binary,
-    such as Xcode's UI test runner, which `llvm-cov` otherwise refuses."""
+def _archs(binary: Path) -> list[str]:
+    try:
+        command = ["xcrun", "lipo", "-archs", str(binary)]
+        completed = subprocess.run(command, capture_output=True, text=True)
+    except OSError:
+        return []
+    return completed.stdout.split() if completed.returncode == 0 else []
 
-    arch = f"-arch={platform.machine()}"
+
+def _arch_options(binaries: list[Path]) -> list[list[str]]:
+    """The `-arch` to follow each binary with, or none at all.
+
+    `llvm-cov` refuses a universal binary, even one with a single slice such
+    as Xcode's UI test runner, without `-arch`, and pairs the `-arch` options
+    with the binaries in order, so every binary gets its own: `arm64` if it
+    has that slice, its first slice otherwise. When `lipo` cannot read one
+    binary, none gets an `-arch`.
+    """
+
+    archs = [_archs(binary) for binary in binaries]
+    unread = [str(binary) for binary, found in zip(binaries, archs) if not found]
+    if unread:
+        _warn(f"lipo could not read the architecture of {', '.join(unread)}; llvm-cov gets no -arch.")
+        return [[] for _ in binaries]
+    return [[f"-arch={'arm64' if 'arm64' in found else found[0]}"] for found in archs]
+
+
+def _export(profile: Path, binaries: list[Path]) -> str | None:
+    options = _arch_options(binaries)
     command = [
         "xcrun", "llvm-cov", "export", "-format=lcov", "-skip-functions",
-        "-instr-profile", str(profile), str(binaries[0]), arch,
+        "-instr-profile", str(profile), str(binaries[0]), *options[0],
     ]
-    for binary in binaries[1:]:
-        command.extend(["-object", str(binary), arch])
+    for binary, arch in zip(binaries[1:], options[1:]):
+        command.extend(["-object", str(binary), *arch])
     try:
         completed = subprocess.run(command, capture_output=True, text=True)
     except OSError as exc:
@@ -162,13 +194,22 @@ def _merge_export(merged: dict[str, dict[int, int]], export: Path, sources: dict
     if not isinstance(data, dict) or data.get("type") != _EXPORT_TYPE:
         _warn(f"{export}: not a swift test coverage export (no type {_EXPORT_TYPE}); skipped.")
         return
-    for unit in data.get("data", []):
-        for file in unit.get("files", []):
-            counts = _counts_for(merged, file["filename"], sources)
-            if counts is None:
-                continue
-            for number, hits in _line_counts(file.get("segments", [])).items():
-                counts[number] = counts.get(number, 0) + hits
+    read: dict[str, dict[int, int]] = {}
+    try:
+        for unit in data.get("data", []):
+            for file in unit.get("files", []):
+                counts = _counts_for(read, file["filename"], sources)
+                if counts is None:
+                    continue
+                for number, hits in _line_counts(file.get("segments", [])).items():
+                    counts[number] = counts.get(number, 0) + hits
+    except (AttributeError, IndexError, KeyError, TypeError) as exc:
+        _warn(f"{export}: not a swift test coverage export ({exc!r}); skipped.")
+        return
+    for source, counts in read.items():
+        target = merged.setdefault(source, {})
+        for number, hits in counts.items():
+            target[number] = target.get(number, 0) + hits
 
 
 def _lcov_text(merged: dict[str, dict[int, int]]) -> str:
@@ -205,7 +246,7 @@ def convert(root: Path, files: list[Path]) -> None:
     if not profiles and not exports:
         _warn(
             f"No Xcode coverage profile (Build/ProfileData/*/*.profdata) and no swift test "
-            f"export (*.json) in {folder}. Pass -derivedDataPath target/coverage/swift/DerivedData "
+            f"export (*.json) in {folder}. Pass -derivedDataPath {DERIVED_DATA.as_posix()} "
             "to xcodebuild, or copy the file swift test --show-codecov-path prints there. "
             "Swift coverage will score 0%."
         )

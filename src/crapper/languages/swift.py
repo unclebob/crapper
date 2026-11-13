@@ -14,8 +14,9 @@ one entry), `willSet`/`didSet` observers, and a property initialised by a
 closure. Functions nested in another entry and closures stay in the enclosing
 entry. The namespace is the module, the folder after `Sources/` in the file's
 absolute path, then the chain of enclosing types; an extension counts as the
-type it extends. Without `Sources/<Module>/` it is the type chain alone, and a
-top-level function takes the module, or the file stem.
+type it extends, and an extension of `[T]`, `[K: V]`, or `T?` as `Array`,
+`Dictionary`, or `Optional`. Without `Sources/<Module>/` it is the type chain
+alone, and a top-level function takes the module, or the file stem.
 """
 
 import re
@@ -63,18 +64,65 @@ _OPERATORS = {
 _QUESTION_PARENTS = {"ternary_expression", "navigation_expression", "call_expression"}
 _WHERE_PARENTS = {"for_statement", "catch_block"}
 _PROPERTY_BODIES = {"computed_property", "willset_didset_block"}
+# The standard library type behind each sugared type an extension can name.
+_SUGARED_TYPES = {"array_type": "Array", "dictionary_type": "Dictionary", "optional_type": "Optional"}
 
 
 def _blank(text: str) -> str:
     return re.sub(r"[^\n]", " ", text)
 
 
+def _string_end(source: str, start: int, hashes: int) -> int:
+    """The index after the string literal whose opening quote is at `start`.
+
+    A raw string, opened with `hashes` `#`s, has no escapes and ends at a quote
+    followed by as many `#`s. A single-line string also ends at a newline, so
+    an unmatched quote cannot run on.
+    """
+
+    quote = '"""' if source.startswith('"""', start) else '"'
+    closing = quote + "#" * hashes
+    index = start + len(quote)
+    while index < len(source):
+        if source[index] == "\\" and not hashes:
+            index += 2
+        elif source.startswith(closing, index):
+            return index + len(closing)
+        elif source[index] == "\n" and quote == '"':
+            return index
+        else:
+            index += 1
+    return index
+
+
+def _skipped(source: str, index: int) -> int | None:
+    """The index after the comment or string literal starting at `index`, if one does."""
+
+    if source.startswith("//", index):
+        end = source.find("\n", index)
+        return len(source) if end < 0 else end
+    if source.startswith("/*", index):
+        end = source.find("*/", index + 2)
+        return len(source) if end < 0 else end + 2
+    quote = index
+    while quote < len(source) and source[quote] == "#":
+        quote += 1
+    if quote < len(source) and source[quote] == '"':
+        return _string_end(source, quote, quote - index)
+    return None
+
+
 def _close_paren(source: str, start: int) -> int:
-    """The index after the parenthesis that closes the one before `start`."""
+    """The index after the parenthesis that closes the one before `start`,
+    skipping comments and string literals such as a default argument's."""
 
     depth = 1
     index = start
     while index < len(source) and depth:
+        skipped = _skipped(source, index)
+        if skipped is not None:
+            index = skipped
+            continue
         if source[index] == "(":
             depth += 1
         elif source[index] == ")":
@@ -142,7 +190,8 @@ def _type_name(data: bytes, node) -> str | None:
     if child_of_type(node, "extension") is not None:
         extended = child_of_type(node, "user_type")
         if extended is None:
-            return None
+            sugared = (_SUGARED_TYPES.get(child.type) for child in node.children)
+            return next((name for name in sugared if name), None)
         names = [node_text(data, part) for part in extended.children if part.type == "type_identifier"]
         return ".".join(names) or None
     ident = child_of_type(node, "type_identifier")
