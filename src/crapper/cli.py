@@ -22,8 +22,7 @@ from crapper.discover import (
     SWIFT_MANIFEST,
     SWIFT_TEST_DIR_SUFFIX,
     TEST_DIRS,
-    is_swift_build_output,
-    is_test_file,
+    is_scored,
     iter_source_files,
     language_of,
 )
@@ -394,13 +393,7 @@ def _positionals(root: Path, args: list[str]) -> tuple[list[Path], list[str]]:
 
 
 def _changed_source(root: Path) -> list[Path]:
-    return [
-        path
-        for path in _changed_files(root)
-        if language_of(path) is not None
-        and not is_test_file(path, root)
-        and not is_swift_build_output(path, root)
-    ]
+    return [path for path in _changed_files(root) if is_scored(path, root)]
 
 
 def _explicit_files(root: Path, existing: list[Path]) -> list[Path]:

@@ -369,6 +369,84 @@ def test_changed_selection_keeps_swift_files_of_a_project_inside_a_build_folder_
     assert text.count(":name ") == 1
 
 
+def _commit_then_modify(repo: Path, files: dict[str, str]) -> None:
+    """Commit `files` (relative path to contents), then modify each one."""
+
+    git = ["git", "-C", str(repo)]
+    subprocess.run([*git, "init"], check=True, capture_output=True)
+    subprocess.run([*git, "config", "user.email", "t@example.com"], check=True)
+    subprocess.run([*git, "config", "user.name", "t"], check=True)
+    for relative, text in files.items():
+        _write(repo, relative, text)
+    subprocess.run([*git, "add", "-A", "-f"], check=True)
+    subprocess.run([*git, "commit", "-m", "init"], check=True, capture_output=True)
+    for relative, text in files.items():
+        _write(repo, relative, text + "\n")
+
+
+def test_changed_selection_skips_fsharp_build_folders_in_a_real_repository(tmp_path):
+    _commit_then_modify(
+        tmp_path,
+        {
+            "Demo/Board.fs": "module Demo.Board\n\nlet kept x = x\n",
+            "Demo/bin/Debug/Gen.fs": "module Demo.Gen\n\nlet fromBin x = x\n",
+            "Demo/obj/Debug/Gen.fs": "module Demo.Gen\n\nlet fromObj x = x\n",
+        },
+    )
+    assert run(["--root", str(tmp_path), "--no-coverage", "--changed"]) == 0
+    text = (tmp_path / ".metrics" / "crap.edn").read_text(encoding="utf-8")
+    assert ':name "kept"' in text
+    assert text.count(":name ") == 1
+
+
+_PROJECT_WITH_VENDOR_AND_BUILD = {
+    "src/app.py": "def kept():\n    return 1\n",
+    "vendor/lib/dep.py": "def from_vendor():\n    return 1\n",
+    "build/generated/gen.py": "def from_build():\n    return 1\n",
+}
+
+
+def test_changed_selection_skips_committed_vendor_and_build_folders(tmp_path):
+    _commit_then_modify(tmp_path, _PROJECT_WITH_VENDOR_AND_BUILD)
+    assert run(["--root", str(tmp_path), "--no-coverage", "--changed"]) == 0
+    text = (tmp_path / ".metrics" / "crap.edn").read_text(encoding="utf-8")
+    assert ':name "kept"' in text
+    assert text.count(":name ") == 1
+
+
+@pytest.mark.parametrize(
+    ("args", "name"),
+    [
+        (["vendor"], "from_vendor"),
+        (["--source-root", "build/generated"], "from_build"),
+    ],
+)
+def test_a_skipped_folder_named_on_the_command_line_is_scored(tmp_path, args, name):
+    for relative, text in _PROJECT_WITH_VENDOR_AND_BUILD.items():
+        _write(tmp_path, relative, text)
+    assert run(["--root", str(tmp_path), "--no-coverage", *args]) == 0
+    text = (tmp_path / ".metrics" / "crap.edn").read_text(encoding="utf-8")
+    assert f':name "{name}"' in text
+    assert text.count(":name ") == 1
+
+
+@pytest.mark.parametrize("outer", ["build", "vendor"])
+def test_a_project_inside_a_skipped_folder_name_keeps_its_sources(tmp_path, outer):
+    root = tmp_path / outer / "app"
+    _commit_then_modify(
+        tmp_path,
+        {
+            f"{outer}/app/src/app.py": "def kept():\n    return 1\n",
+            f"{outer}/app/{outer}/dep.py": "def skipped():\n    return 1\n",
+        },
+    )
+    assert iter_source_files([root], root) == [(root / "src/app.py").resolve()]
+    assert run(["--root", str(root), "--no-coverage", "--changed"]) == 0
+    text = (root / ".metrics" / "crap.edn").read_text(encoding="utf-8")
+    assert ':name "kept"' in text
+    assert text.count(":name ") == 1
+
+
 # A project whose own path runs through a folder named like a test folder:
 # (folder the project lives in, its source file, a test file in a test folder inside it).
 _PROJECTS_IN_TEST_FOLDER_NAMES = {

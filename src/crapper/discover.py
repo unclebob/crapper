@@ -155,8 +155,19 @@ def _is_build_output(path: Path, root: Path) -> bool:
     )
 
 
-def _is_scored(path: Path, base: Path) -> bool:
+def is_scored(path: Path, base: Path, walked: Path | None = None) -> bool:
+    """A source file to score: in a known language, not a test, not in a skipped
+    folder, and not build output.
+
+    Test and build-output folders count only below `base`, the project root.
+    Skipped folders such as `vendor` or `build` count only below `walked`, the
+    folder being searched (the project root by default), so a folder named on
+    the command line is still searched.
+    """
+
     if language_of(path) is None or is_test_file(path, base):
+        return False
+    if any(part in SKIP_DIRS for part in _folders_below(path, walked or base)):
         return False
     return not _is_build_output(path, base) and not is_swift_build_output(path, base)
 
@@ -168,12 +179,14 @@ def _walk(root: Path, base: Path) -> list[Path]:
         return [root]
     found: list[Path] = []
     for dirpath, dirnames, filenames in os.walk(root):
+        # Pruning only saves time: is_scored applies the same folder rules,
+        # with skipped folders measured from `root`, as os.walk prunes them.
         dirnames[:] = [
             name for name in dirnames if name not in SKIP_DIRS and name not in TEST_DIRS
         ]
         for name in filenames:
             path = Path(dirpath) / name
-            if _is_scored(path, base):
+            if is_scored(path, base, root):
                 found.append(path)
     return found
 
