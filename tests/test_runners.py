@@ -767,7 +767,7 @@ def test_a_failed_kover_run_warns_and_scores_zero(tmp_path, monkeypatch, capsys)
     _write(tmp_path, "gradlew", "#!/bin/sh\n")
     _stale_kover_report(tmp_path)
     _stale_kover_report(tmp_path, "app")
-    _stale_kover_report(tmp_path, "data/pool")
+    _stale_kover_report(tmp_path, "data/feature")
     monkeypatch.setattr("crapper.runners.run_shell", lambda command, cwd: 1)
     run_coverage(tmp_path, [source], None)
     assert "Kotlin coverage exited 1" in capsys.readouterr().err
@@ -786,7 +786,7 @@ def test_kotlin_without_gradle_settings_skips_kotlin_coverage(tmp_path, monkeypa
 def _swift_project(root: Path) -> tuple[Path, Path, Path]:
     """A Swift source, the profile a command left in its derived data, and an earlier LCOV file."""
 
-    source = _write(root, "Pool/Sources/Pool/Board.swift", "func place() {}\n")
+    source = _write(root, "Feature/Sources/Feature/Board.swift", "func place() {}\n")
     profile = _write(root, "target/coverage/swift/DerivedData/Build/ProfileData/SIM/Coverage.profdata", "p")
     lcov = _write(root, "target/coverage/swift/lcov.info", f"SF:{source}\nDA:1,1\nend_of_record\n")
     return source, profile, lcov

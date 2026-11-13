@@ -394,7 +394,7 @@ def test_a_kotlin_function_whose_class_is_absent_from_the_report_scores_zero(tmp
 def test_kover_reports_at_the_root_and_two_levels_down_merge_with_jacoco(tmp_path):
     _write_kover(tmp_path, ".", {"demo/BoardKt": [("place", 0, 4)]})
     _write_kover(tmp_path, "app", {"demo/Board": [("tick", 1, 1)]})
-    _write_kover(tmp_path, "data/pool", {"demo/Board": [("clear", 3, 1)]})
+    _write_kover(tmp_path, "data/feature", {"demo/Board": [("clear", 3, 1)]})
     jacoco = tmp_path / "target" / "site" / "jacoco" / "jacoco.xml"
     jacoco.parent.mkdir(parents=True)
     jacoco.write_text(
@@ -418,7 +418,7 @@ def test_kover_reports_at_the_root_and_two_levels_down_merge_with_jacoco(tmp_pat
 
 def test_an_interface_default_function_scores_from_the_interface_not_its_default_impls_bridge(tmp_path):
     # Kotlin 2 compiles the body into the interface and leaves a two-instruction
-    # bridge in `$DefaultImpls`, as tyche's report shows for `SavedBet.scoreOrNull`.
+    # bridge in `$DefaultImpls`; Kover reports both.
     _write_kover(
         tmp_path,
         ".",

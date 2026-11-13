@@ -256,9 +256,9 @@ def test_kotlin_test_source_sets_build_output_and_gradle_scripts_are_not_scored(
 
 def test_swift_test_folders_manifests_and_build_folders_are_not_scored(tmp_path):
     files = {
-        "Pool/Sources/Pool/PoolView.swift": "struct PoolView { func show() {} }\n",
-        "Pool/Package.swift": "let package = Package(name: \"Pool\")\n",
-        "Pool/Tests/PoolTests/PoolViewTests.swift": "func t() {}\n",
+        "Feature/Sources/Feature/FeatureView.swift": "struct FeatureView { func show() {} }\n",
+        "Feature/Package.swift": "let package = Package(name: \"Feature\")\n",
+        "Feature/Tests/FeatureTests/FeatureViewTests.swift": "func t() {}\n",
         "App/AppUITests/LaunchTests.swift": "func u() {}\n",
         "App/.build/checkouts/Dep/Dep.swift": "func d() {}\n",
         "App/Pods/Lib/Lib.swift": "func p() {}\n",
@@ -271,7 +271,7 @@ def test_swift_test_folders_manifests_and_build_folders_are_not_scored(tmp_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
     assert iter_source_files([tmp_path]) == [
-        (tmp_path / "Pool/Sources/Pool/PoolView.swift").resolve(),
+        (tmp_path / "Feature/Sources/Feature/FeatureView.swift").resolve(),
         (tmp_path / "shared/src/mainTests/kotlin/demo/Board.kt").resolve(),
     ]
 

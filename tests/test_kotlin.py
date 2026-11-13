@@ -66,8 +66,8 @@ def test_file_jvm_name_and_a_lower_case_stem_name_the_top_level_class():
     named = '@file:JvmName("Utilities")\npackage demo\n\nfun run() = 1\n'
     assert entries(named) == [("demo", "run", "demo.Utilities")]
     lower = "package demo\n\nfun run() = 1\n"
-    assert entries(lower, "src/main/kotlin/demo/poolFromLayout.kt") == [
-        ("demo", "run", "demo.PoolFromLayoutKt")
+    assert entries(lower, "src/main/kotlin/demo/featureFromLayout.kt") == [
+        ("demo", "run", "demo.FeatureFromLayoutKt")
     ]
 
 

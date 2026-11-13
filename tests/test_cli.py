@@ -55,11 +55,11 @@ def test_kotlin_sources_are_kotlin_and_gradle_scripts_are_not_scored():
 
 
 def test_swift_sources_are_swift_and_manifests_tests_and_build_folders_are_not_scored():
-    assert language_of("Pool/Sources/Pool/PoolView.swift") == "swift"
-    assert language_of("Pool/Package.swift") is None
-    assert is_test_file("Pool/Tests/PoolTests/PoolViewTests.swift") is True
+    assert language_of("Feature/Sources/Feature/FeatureView.swift") == "swift"
+    assert language_of("Feature/Package.swift") is None
+    assert is_test_file("Feature/Tests/FeatureTests/FeatureViewTests.swift") is True
     assert is_test_file("App/AppUITests/LaunchTests.swift") is True
-    assert is_test_file("Pool/Sources/Pool/PoolView.swift") is False
+    assert is_test_file("Feature/Sources/Feature/FeatureView.swift") is False
     assert is_test_file("shared/CoreTests/kotlin/Board.kt") is False
 
 
@@ -330,9 +330,9 @@ def test_changed_selection_ignores_files_git_did_not_name(tmp_path, monkeypatch,
 
 def test_changed_selection_skips_swift_manifests_tests_and_build_folders(tmp_path, monkeypatch):
     changed = {
-        "Pool/Sources/Pool/PoolView.swift": "struct PoolView {\n    func kept() {}\n}\n",
-        "Pool/Package.swift": "func manifest() {}\n",
-        "Pool/Tests/PoolTests/PoolViewTests.swift": "func fromTests() {}\n",
+        "Feature/Sources/Feature/FeatureView.swift": "struct FeatureView {\n    func kept() {}\n}\n",
+        "Feature/Package.swift": "func manifest() {}\n",
+        "Feature/Tests/FeatureTests/FeatureViewTests.swift": "func fromTests() {}\n",
         "App/AppTests/AppTests.swift": "func fromAppTests() {}\n",
         "App/Pods/Lib/Lib.swift": "func fromPods() {}\n",
         "App/.build/checkouts/Dep.swift": "func fromBuild() {}\n",
@@ -403,6 +403,7 @@ _PROJECT_WITH_VENDOR_AND_BUILD = {
     "src/app.py": "def kept():\n    return 1\n",
     "vendor/lib/dep.py": "def from_vendor():\n    return 1\n",
     "build/generated/gen.py": "def from_build():\n    return 1\n",
+    "Pods/Lib/Lib.swift": "func fromPods() {}\n",
 }
 
 
@@ -419,6 +420,8 @@ def test_changed_selection_skips_committed_vendor_and_build_folders(tmp_path):
     [
         (["vendor"], "from_vendor"),
         (["--source-root", "build/generated"], "from_build"),
+        (["Pods/Lib"], "fromPods"),
+        (["--source-root", "Pods/Lib"], "fromPods"),
     ],
 )
 def test_a_skipped_folder_named_on_the_command_line_is_scored(tmp_path, args, name):
@@ -430,7 +433,28 @@ def test_a_skipped_folder_named_on_the_command_line_is_scored(tmp_path, args, na
     assert text.count(":name ") == 1
 
 
-@pytest.mark.parametrize("outer", ["build", "vendor"])
+# A Swift package next to dependency checkouts and Xcode output in every language.
+_IOS_PROJECT_WITH_BUILD_FOLDERS = {
+    "Feature/Sources/Feature/FeatureView.swift": "struct FeatureView {\n    func kept() {}\n}\n",
+    "Feature/.build/checkouts/dep/scripts/lint.py": "def from_checkouts():\n    return 1\n",
+    "Feature/.build/index-build/checkouts/dep/gen.js": "function fromIndexBuild() {\n  return 1;\n}\n",
+    "App/Pods/P/z.py": "def from_pods():\n    return 1\n",
+    "App/Carthage/Checkouts/c/c.go": "package c\n\nfunc FromCarthage() int { return 1 }\n",
+    "App/DerivedData/App/Build/d.py": "def from_derived_data():\n    return 1\n",
+}
+
+
+def test_ios_build_folders_are_skipped_for_every_language(tmp_path):
+    _commit_then_modify(tmp_path, _IOS_PROJECT_WITH_BUILD_FOLDERS)
+    kept = (tmp_path / "Feature/Sources/Feature/FeatureView.swift").resolve()
+    assert iter_source_files([tmp_path], tmp_path) == [kept]
+    assert run(["--root", str(tmp_path), "--no-coverage", "--changed"]) == 0
+    text = (tmp_path / ".metrics" / "crap.edn").read_text(encoding="utf-8")
+    assert ':name "kept"' in text
+    assert text.count(":name ") == 1
+
+
+@pytest.mark.parametrize("outer", ["build", "vendor", ".build", "Pods", "Carthage", "DerivedData"])
 def test_a_project_inside_a_skipped_folder_name_keeps_its_sources(tmp_path, outer):
     root = tmp_path / outer / "app"
     _commit_then_modify(
@@ -518,17 +542,14 @@ def test_changed_selection_keeps_sources_of_a_project_inside_a_test_folder_name(
         ["app/src/androidTest"],
         ["-s", "app/src/androidTest"],
         ["-s", "app/src/androidTest/kotlin"],
-        ["Pods/Lib"],
-        ["-s", "Pods/Lib"],
     ],
 )
-def test_a_path_inside_a_test_or_build_folder_of_the_project_selects_nothing(
+def test_a_path_inside_a_test_folder_of_the_project_selects_nothing(
     tmp_path, monkeypatch, args
 ):
     for relative in (
         "tests/helpers.py",
         "app/src/androidTest/kotlin/Helper.kt",
-        "Pods/Lib/Lib.swift",
     ):
         _write(tmp_path, relative, "x\n")
     monkeypatch.chdir(tmp_path)

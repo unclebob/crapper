@@ -3,7 +3,7 @@ import pytest
 from crapper.languages.swift import functions_in_source
 
 
-def entries(source, path="Tyche/Views/Board.swift", root="/proj"):
+def entries(source, path="App/Views/Board.swift", root="/proj"):
     return [(fn.namespace, fn.name) for fn in functions_in_source(source, path, root)]
 
 
@@ -87,13 +87,13 @@ def test_the_module_after_sources_prefixes_the_type_chain():
     source = """
 func helper() {}
 
-enum Pool {
+enum Feature {
     struct Row {
         func show() {}
     }
 }
 
-extension Pool.Row {
+extension Feature.Row {
     func hide() {}
 }
 
@@ -101,11 +101,11 @@ public extension View {
     func card() -> some View { self }
 }
 """
-    assert entries(source, "Pool/Sources/Pool/Views/Row.swift") == [
-        ("Pool", "helper"),
-        ("Pool.Pool.Row", "show"),
-        ("Pool.Pool.Row", "hide"),
-        ("Pool.View", "card"),
+    assert entries(source, "Feature/Sources/Feature/Views/Row.swift") == [
+        ("Feature", "helper"),
+        ("Feature.Feature.Row", "show"),
+        ("Feature.Feature.Row", "hide"),
+        ("Feature.View", "card"),
     ]
 
 
@@ -119,7 +119,7 @@ def test_the_module_comes_from_the_absolute_path_not_the_project_root():
 
 def test_without_sources_the_type_chain_or_the_file_stem_is_the_namespace():
     source = "func start() {}\n\nstruct HomeView {\n    func show() {}\n}\n"
-    assert entries(source, "Tyche/Views/HomeScreen.swift") == [
+    assert entries(source, "App/Views/HomeScreen.swift") == [
         ("HomeScreen", "start"),
         ("HomeView", "show"),
     ]
@@ -345,8 +345,8 @@ extension Int? {
     func orZero() -> Int { 0 }
 }
 """
-    assert entries(source, "Pool/Sources/Pool/Sugar.swift") == [
-        ("Pool.Array", "total"),
-        ("Pool.Dictionary", "keys"),
-        ("Pool.Optional", "orZero"),
+    assert entries(source, "Feature/Sources/Feature/Sugar.swift") == [
+        ("Feature.Array", "total"),
+        ("Feature.Dictionary", "keys"),
+        ("Feature.Optional", "orZero"),
     ]

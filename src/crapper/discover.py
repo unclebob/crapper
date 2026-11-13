@@ -44,6 +44,10 @@ SKIP_DIRS = {
     "testdata",
     "__pycache__",
     ".clj-kondo",
+    ".build",
+    "Pods",
+    "Carthage",
+    "DerivedData",
 }
 
 TEST_DIRS = {"test", "tests", "spec", "specs", "__tests__"}
@@ -52,7 +56,6 @@ DOTNET_BUILD_DIRS = {"bin", "obj"}
 KOTLIN_TEST_SOURCE_SET_SUFFIX = "Test"
 SWIFT_TEST_DIR_SUFFIX = "Tests"
 SWIFT_MANIFEST = "Package.swift"
-SWIFT_BUILD_DIRS = {".build", "Pods", "Carthage", "DerivedData"}
 
 GO_TEST_SUFFIX = "_test.go"
 CLOJURE_TEST_SUFFIXES = ("_test.clj", "_test.cljc", "_test.cljs", "_test.bb")
@@ -91,18 +94,6 @@ def _folders_below(path: Path, root: Path | None) -> tuple[str, ...]:
     """The folders between `root` and the file; all of them without a root."""
 
     return (path if root is None else path.relative_to(root)).parts[:-1]
-
-
-def is_swift_build_output(path: Path, root: Path) -> bool:
-    """A Swift file under `.build`, `Pods`, `Carthage`, or `DerivedData` below `root`.
-
-    Only the folders below the project root count, so a project that itself
-    lives inside a folder with one of those names keeps its files.
-    """
-
-    return language_of(path) == "swift" and any(
-        part in SWIFT_BUILD_DIRS for part in _folders_below(path, root)
-    )
 
 
 def is_test_file(path: str | Path, root: Path | None = None) -> bool:
@@ -169,7 +160,7 @@ def is_scored(path: Path, base: Path, walked: Path | None = None) -> bool:
         return False
     if any(part in SKIP_DIRS for part in _folders_below(path, walked or base)):
         return False
-    return not _is_build_output(path, base) and not is_swift_build_output(path, base)
+    return not _is_build_output(path, base)
 
 
 def _walk(root: Path, base: Path) -> list[Path]:

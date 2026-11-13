@@ -19,11 +19,11 @@ def _derived_data(root: Path, name: str = "DerivedData", device: str = "B2F2EDFE
     derived = root / "target" / "coverage" / "swift" / name
     profile = _write(derived, f"Build/ProfileData/{device}/Coverage.profdata", "profile")
     products = derived / "Build" / "Products" / "Debug-iphonesimulator"
-    _write(products, "PoolTests.xctest/PoolTests", "binary")
-    _write(products, "Tyche.app/Tyche", "binary")
-    _write(products, "Tyche.app/Tyche.debug.dylib", "binary")
-    _write(products, "Tyche.app/PlugIns/TycheTests.xctest/TycheTests", "binary")
-    _write(products, "Pool.o", "object")
+    _write(products, "FeatureTests.xctest/FeatureTests", "binary")
+    _write(products, "Shop.app/Shop", "binary")
+    _write(products, "Shop.app/Shop.debug.dylib", "binary")
+    _write(products, "Shop.app/PlugIns/ShopTests.xctest/ShopTests", "binary")
+    _write(products, "Feature.o", "object")
     return profile
 
 
@@ -71,13 +71,13 @@ def _converted(root: Path) -> dict:
 
 
 def test_only_the_executable_lines_of_the_scored_files_are_written(tmp_path, monkeypatch):
-    board = _write(tmp_path, "Pool/Sources/Pool/Board.swift")
+    board = _write(tmp_path, "Feature/Sources/Feature/Board.swift")
     profile = _derived_data(tmp_path)
     _fake_llvm_cov(
         monkeypatch,
         {
             profile: _record(board, {2: 3, 3: 0})
-            + _record(tmp_path / "Pool/Tests/PoolTests/BoardTests.swift", {1: 5})
+            + _record(tmp_path / "Feature/Tests/FeatureTests/BoardTests.swift", {1: 5})
             + _record("/Users/ci/checkouts/Lib/Sources/Lib/Lib.swift", {1: 5})
         },
     )
@@ -86,7 +86,7 @@ def test_only_the_executable_lines_of_the_scored_files_are_written(tmp_path, mon
 
 
 def test_a_file_in_two_inputs_is_covered_where_either_covers_it(tmp_path, monkeypatch):
-    board = _write(tmp_path, "Pool/Sources/Pool/Board.swift")
+    board = _write(tmp_path, "Feature/Sources/Feature/Board.swift")
     first = _derived_data(tmp_path, device="IPHONE")
     second = _derived_data(tmp_path, device="IPAD")
     _fake_llvm_cov(
@@ -106,16 +106,16 @@ def test_absolute_paths_are_kept_and_score_the_function_they_name(tmp_path, monk
     from crapper.coverage import load_bundle
 
     source = "func place(_ open: Bool) -> Int {\n    if open { return 1 }\n    return 0\n}\n"
-    board = _write(tmp_path, "Pool/Sources/Pool/Board.swift", source)
-    other = _write(tmp_path, "UI/Sources/Pool/Board.swift", source)
+    board = _write(tmp_path, "Feature/Sources/Feature/Board.swift", source)
+    other = _write(tmp_path, "UI/Sources/Feature/Board.swift", source)
     profile = _derived_data(tmp_path)
     _fake_llvm_cov(monkeypatch, {profile: _record(board, {1: 2, 2: 2, 3: 0, 4: 0})})
     convert(tmp_path, [board, other])
     assert lcov_path(tmp_path).read_text().startswith(f"SF:{board}\n")
     entries = analyze_files([board, other], tmp_path, load_bundle(tmp_path))
     assert {entry.path: entry.coverage for entry in entries} == {
-        "Pool/Sources/Pool/Board.swift": 50.0,
-        "UI/Sources/Pool/Board.swift": 0.0,
+        "Feature/Sources/Feature/Board.swift": 50.0,
+        "UI/Sources/Feature/Board.swift": 0.0,
     }
 
 
@@ -138,11 +138,11 @@ def test_llvm_cov_reads_each_profile_against_the_test_bundles_and_apps_built_bes
         [
             "xcrun", "llvm-cov", "export", "-format=lcov", "-skip-functions",
             "-instr-profile", str(profile),
-            str(products / "PoolTests.xctest" / "PoolTests"), "-arch=arm64",
-            "-object", str(products / "Tyche.app" / "Tyche"), "-arch=arm64",
-            "-object", str(products / "Tyche.app" / "Tyche.debug.dylib"), "-arch=arm64",
+            str(products / "FeatureTests.xctest" / "FeatureTests"), "-arch=arm64",
+            "-object", str(products / "Shop.app" / "Shop"), "-arch=arm64",
+            "-object", str(products / "Shop.app" / "Shop.debug.dylib"), "-arch=arm64",
             "-object",
-            str(products / "Tyche.app" / "PlugIns" / "TycheTests.xctest" / "TycheTests"),
+            str(products / "Shop.app" / "PlugIns" / "ShopTests.xctest" / "ShopTests"),
             "-arch=arm64",
         ]
     ]
@@ -151,7 +151,7 @@ def test_llvm_cov_reads_each_profile_against_the_test_bundles_and_apps_built_bes
 def test_each_binary_names_arm64_when_it_has_that_slice_and_its_first_slice_otherwise(
     tmp_path, monkeypatch
 ):
-    archs = {"PoolTests": "x86_64", "Tyche": "x86_64 arm64", "TycheTests": "x86_64 i386"}
+    archs = {"FeatureTests": "x86_64", "Shop": "x86_64 arm64", "ShopTests": "x86_64 i386"}
     calls, _profile, _products = _llvm_cov_calls(tmp_path, monkeypatch, archs)
     assert [part for part in calls[0] if part.startswith("-arch")] == [
         "-arch=x86_64", "-arch=arm64", "-arch=arm64", "-arch=x86_64",
@@ -163,20 +163,20 @@ def test_a_universal_binary_with_one_slice_names_it(tmp_path, monkeypatch):
     # lipo lists one architecture, as for a thin binary, and llvm-cov still
     # refuses it without -arch.
     runner = _write(tmp_path, "target/coverage/swift/DerivedData/Build/Products/Debug-iphonesimulator/"
-                    "TycheUITests-Runner.app/TycheUITests-Runner", "binary")
-    calls, _profile, _products = _llvm_cov_calls(tmp_path, monkeypatch, {"TycheUITests-Runner": "arm64"})
+                    "ShopUITests-Runner.app/ShopUITests-Runner", "binary")
+    calls, _profile, _products = _llvm_cov_calls(tmp_path, monkeypatch, {"ShopUITests-Runner": "arm64"})
     assert calls[0][calls[0].index(str(runner)) + 1] == "-arch=arm64"
 
 
 def test_a_binary_lipo_cannot_read_leaves_every_binary_without_an_arch(tmp_path, monkeypatch, capsys):
-    calls, _profile, products = _llvm_cov_calls(tmp_path, monkeypatch, {"Tyche.debug.dylib": ""})
+    calls, _profile, products = _llvm_cov_calls(tmp_path, monkeypatch, {"Shop.debug.dylib": ""})
     assert calls and not [part for part in calls[0] if part.startswith("-arch")]
     err = capsys.readouterr().err
-    assert f"architecture of {products / 'Tyche.app' / 'Tyche.debug.dylib'};" in err
+    assert f"architecture of {products / 'Shop.app' / 'Shop.debug.dylib'};" in err
 
 
 def test_without_xcrun_xcode_inputs_are_skipped_with_a_warning(tmp_path, monkeypatch, capsys):
-    board = _write(tmp_path, "Pool/Sources/Pool/Board.swift")
+    board = _write(tmp_path, "Feature/Sources/Feature/Board.swift")
     profile = _derived_data(tmp_path)
     calls = []
     monkeypatch.setattr("crapper.languages.swift_coverage.shutil.which", lambda name: None)
@@ -217,7 +217,7 @@ def test_a_profile_llvm_cov_cannot_read_is_skipped_with_a_warning(tmp_path, monk
 def test_a_folder_without_a_profile_warns_and_writes_nothing(tmp_path, monkeypatch, capsys):
     board = _write(tmp_path, "Board.swift")
     stale = _write(tmp_path, "target/coverage/swift/lcov.info", f"SF:{board}\nDA:1,1\nend_of_record\n")
-    _write(tmp_path, "target/coverage/swift/Tyche.xcresult/Info.plist", "<plist/>\n")
+    _write(tmp_path, "target/coverage/swift/Shop.xcresult/Info.plist", "<plist/>\n")
     monkeypatch.setattr("crapper.languages.swift_coverage.shutil.which", lambda name: "/usr/bin/xcrun")
     convert(tmp_path, [board])
     err = capsys.readouterr().err
