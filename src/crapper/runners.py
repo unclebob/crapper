@@ -331,7 +331,12 @@ def python_roots(root: Path, files: list[Path]) -> list[Path]:
 
 
 def _python_executable(package: Path) -> str:
-    for relative in (".venv/bin/python", "venv/bin/python"):
+    for relative in (
+        ".venv/bin/python",
+        "venv/bin/python",
+        ".venv/Scripts/python.exe",
+        "venv/Scripts/python.exe",
+    ):
         candidate = package / relative
         if candidate.is_file():
             return str(candidate)

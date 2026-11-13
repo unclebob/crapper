@@ -547,3 +547,10 @@ def test_vitest_install_restores_manifests_when_install_changes_them(tmp_path, m
 def test_python_sources_name_a_top_level_module_without_its_suffix(tmp_path):
     module = tmp_path / "carddav.py"
     assert python_sources(tmp_path, [module, tmp_path / "test_carddav.py"]) == "carddav"
+
+
+def test_python_executable_finds_a_windows_venv(tmp_path):
+    binary = tmp_path / ".venv" / "Scripts" / "python.exe"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("", encoding="utf-8")
+    assert _python_executable(tmp_path) == str(binary)
