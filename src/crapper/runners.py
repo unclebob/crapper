@@ -255,13 +255,15 @@ def _vitest_includes(package: Path, files: list[Path]) -> list[str]:
     includes: list[str] = []
     package = package.resolve()
     for file in files:
-        if language_of(file) != "typescript" or is_test_file(file):
+        if language_of(file) != "typescript":
             continue
+        resolved = Path(file).resolve()
         try:
-            relative = Path(file).resolve().relative_to(package)
+            relative = resolved.relative_to(package)
         except ValueError:
             continue
-        includes.append(relative.as_posix())
+        if not is_test_file(resolved, package):
+            includes.append(relative.as_posix())
     return includes
 
 
@@ -362,13 +364,15 @@ def python_sources(package: Path, files: list[Path]) -> str:
     package = package.resolve()
     for file in files:
         path = Path(file)
-        if path.suffix != ".py" or is_test_file(path):
+        if path.suffix != ".py":
             continue
+        resolved = path.resolve()
         try:
-            relative = path.resolve().relative_to(package)
+            relative = resolved.relative_to(package)
         except ValueError:
             continue
-        tops.add(_source_name(relative))
+        if not is_test_file(resolved, package):
+            tops.add(_source_name(relative))
     return ",".join(sorted(tops))
 
 

@@ -87,6 +87,12 @@ def language_of(path: str | Path) -> str | None:
     return language
 
 
+def _folders_below(path: Path, root: Path | None) -> tuple[str, ...]:
+    """The folders between `root` and the file; all of them without a root."""
+
+    return (path if root is None else path.relative_to(root)).parts[:-1]
+
+
 def is_swift_build_output(path: Path, root: Path) -> bool:
     """A Swift file under `.build`, `Pods`, `Carthage`, or `DerivedData` below `root`.
 
@@ -95,11 +101,18 @@ def is_swift_build_output(path: Path, root: Path) -> bool:
     """
 
     return language_of(path) == "swift" and any(
-        part in SWIFT_BUILD_DIRS for part in path.relative_to(root).parts[:-1]
+        part in SWIFT_BUILD_DIRS for part in _folders_below(path, root)
     )
 
 
-def is_test_file(path: str | Path) -> bool:
+def is_test_file(path: str | Path, root: Path | None = None) -> bool:
+    """A test file, by its name or by a test folder it sits in.
+
+    Only the folders below `root` count, so a project that itself lives
+    inside a folder named like a test folder keeps its files. Without a root,
+    `path` is taken as relative to the project and all its folders count.
+    """
+
     file_path = Path(path)
     name = file_path.name
     if name.endswith(GO_TEST_SUFFIX):
@@ -112,54 +125,43 @@ def is_test_file(path: str | Path) -> bool:
         return True
     if name.endswith("_test.py") or (name.startswith("test_") and name.endswith(".py")):
         return True
-    if any(part in TEST_DIRS for part in file_path.parts):
+    folders = _folders_below(file_path, root)
+    if any(part in TEST_DIRS for part in folders):
         return True
-    return (
-        _in_dotnet_test_project(file_path)
-        or _in_kotlin_test_source_set(file_path)
-        or _in_swift_test_folder(file_path)
-    )
+    language = language_of(file_path)
+    if language == "fsharp":
+        return any(part.endswith(DOTNET_TEST_DIR_SUFFIXES) for part in folders)
+    if language == "kotlin":
+        return _in_kotlin_test_source_set(folders)
+    if language == "swift":
+        return any(part.endswith(SWIFT_TEST_DIR_SUFFIX) for part in folders)
+    return False
 
 
-def _fsharp_path_has(path: Path, matches) -> bool:
-    return language_of(path) == "fsharp" and any(matches(part) for part in path.parts)
-
-
-def _in_dotnet_test_project(path: Path) -> bool:
-    return _fsharp_path_has(path, lambda part: part.endswith(DOTNET_TEST_DIR_SUFFIXES))
-
-
-def _in_kotlin_test_source_set(path: Path) -> bool:
+def _in_kotlin_test_source_set(folders: tuple[str, ...]) -> bool:
     """`src/androidTest`, `src/commonTest`, and other Gradle test source sets."""
 
-    if language_of(path) != "kotlin":
-        return False
-    parts = path.parts
     return any(
         parent == "src" and child.endswith(KOTLIN_TEST_SOURCE_SET_SUFFIX)
-        for parent, child in zip(parts, parts[1:])
+        for parent, child in zip(folders, folders[1:])
     )
 
 
-def _in_swift_test_folder(path: Path) -> bool:
-    """`Tests`, and Xcode test targets such as `CoreTests` and `AppUITests`."""
+def _is_build_output(path: Path, root: Path) -> bool:
+    """An F# file under `bin` or `obj` below `root`."""
 
-    return language_of(path) == "swift" and any(
-        part.endswith(SWIFT_TEST_DIR_SUFFIX) for part in path.parts[:-1]
+    return language_of(path) == "fsharp" and any(
+        part in DOTNET_BUILD_DIRS for part in _folders_below(path, root)
     )
 
 
-def _is_build_output(path: Path) -> bool:
-    return _fsharp_path_has(path, lambda part: part in DOTNET_BUILD_DIRS)
-
-
-def _is_scored(path: Path, root: Path) -> bool:
-    if language_of(path) is None or is_test_file(path):
+def _is_scored(path: Path, base: Path) -> bool:
+    if language_of(path) is None or is_test_file(path, base):
         return False
-    return not _is_build_output(path.relative_to(root)) and not is_swift_build_output(path, root)
+    return not _is_build_output(path, base) and not is_swift_build_output(path, base)
 
 
-def _walk(root: Path) -> list[Path]:
+def _walk(root: Path, base: Path) -> list[Path]:
     if not root.exists():
         return []
     if root.is_file():
@@ -171,14 +173,21 @@ def _walk(root: Path) -> list[Path]:
         ]
         for name in filenames:
             path = Path(dirpath) / name
-            if _is_scored(path, root):
+            if _is_scored(path, base):
                 found.append(path)
     return found
 
 
-def iter_source_files(roots: list[Path]) -> list[Path]:
+def iter_source_files(roots: list[Path], base: Path | None = None) -> list[Path]:
+    """Source files under each root.
+
+    Folder rules look at the folders below `base`, the project root, when a
+    root is inside it, and below the root itself otherwise.
+    """
+
     files: set[Path] = set()
     for root in roots:
-        for path in _walk(root):
+        inside = base is not None and root.is_relative_to(base)
+        for path in _walk(root, base if inside else root):
             files.add(path.resolve())
     return sorted(files, key=lambda path: path.as_posix())

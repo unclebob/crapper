@@ -18,7 +18,7 @@ CRAP = CC² × (1 − coverage)³ + CC
 ./crapper
 ```
 
-The first run creates `.venv` and installs the tool. From a project root it walks the tree, skips `test`, `spec`, `vendor`, `node_modules`, and `target`, and writes two results:
+The first run creates `.venv` and installs the tool. From a project root it walks the tree, skips `test`, `spec`, `vendor`, `node_modules`, and `target` folders inside the project (a project that itself lives in a folder named `tests` is still scored), and writes two results:
 
 - a table on stdout, worst score first
 - `.metrics/crap.edn`, replaced on every successful analysis

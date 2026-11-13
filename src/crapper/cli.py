@@ -84,6 +84,8 @@ Arguments:
 
 With no paths, source files under the project root are analyzed. Directories
 named {_SKIPPED_DIRS} are skipped, as are {_TEST_PATTERNS}.
+Folder names count only below the project root, so a project that itself
+lives in a folder named tests or *Tests is still analyzed.
 
 F# also skips .fsi files, bin, obj, and {_TEST_DIRS_DOTNET} folders.
 Kotlin also skips .kts files and src/*{KOTLIN_TEST_SOURCE_SET_SUFFIX} source sets
@@ -396,16 +398,16 @@ def _changed_source(root: Path) -> list[Path]:
         path
         for path in _changed_files(root)
         if language_of(path) is not None
-        and not is_test_file(path)
+        and not is_test_file(path, root)
         and not is_swift_build_output(path, root)
     ]
 
 
-def _explicit_files(existing: list[Path]) -> list[Path]:
+def _explicit_files(root: Path, existing: list[Path]) -> list[Path]:
     files: list[Path] = []
     for path in existing:
         if path.is_dir():
-            files.extend(iter_source_files([path]))
+            files.extend(iter_source_files([path], root))
         elif language_of(path) is not None:
             files.append(path)
     return files
@@ -415,10 +417,10 @@ def _selected(options: Options, root: Path, existing: list[Path]) -> list[Path]:
     if options.changed or options.changed_functions:
         return _changed_source(root)
     if options.source_roots:
-        return iter_source_files([(root / path).resolve() for path in options.source_roots])
+        return iter_source_files([(root / path).resolve() for path in options.source_roots], root)
     if existing:
-        return _explicit_files(existing)
-    return iter_source_files([root])
+        return _explicit_files(root, existing)
+    return iter_source_files([root], root)
 
 
 def _apply_filters(files: list[Path], filters: list[str]) -> list[Path]:

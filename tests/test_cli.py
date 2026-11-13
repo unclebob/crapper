@@ -5,8 +5,17 @@ from pathlib import Path
 
 import pytest
 
-from crapper.cli import GitError, _changed_files, _positionals, _take, main, parse_args, run
-from crapper.discover import is_test_file, language_of
+from crapper.cli import (
+    GitError,
+    _changed_files,
+    _positionals,
+    _take,
+    main,
+    parse_args,
+    run,
+    select_files,
+)
+from crapper.discover import is_test_file, iter_source_files, language_of
 
 
 def test_language_detection():
@@ -360,6 +369,102 @@ def test_changed_selection_keeps_swift_files_of_a_project_inside_a_build_folder_
     assert text.count(":name ") == 1
 
 
+# A project whose own path runs through a folder named like a test folder:
+# (folder the project lives in, its source file, a test file in a test folder inside it).
+_PROJECTS_IN_TEST_FOLDER_NAMES = {
+    "python": (
+        "tests/app",
+        ("src/app/core.py", "def kept():\n    return 1\n"),
+        ("tests/helpers.py", "def helper():\n    return 1\n"),
+    ),
+    "typescript": (
+        "spec/app",
+        ("src/core.ts", "export function kept() {\n  return 1;\n}\n"),
+        ("src/__tests__/helpers.ts", "export function helper() {\n  return 1;\n}\n"),
+    ),
+    "go": (
+        "test/app",
+        ("core.go", "package app\n\nfunc kept() int {\n\treturn 1\n}\n"),
+        ("test/helpers.go", "package test\n\nfunc helper() int {\n\treturn 1\n}\n"),
+    ),
+    "swift": (
+        "MyTests/App",
+        ("Sources/App/App.swift", "func kept() {}\n"),
+        ("AppTests/Helpers.swift", "func helper() {}\n"),
+    ),
+    "kotlin": (
+        "src/androidTest/App",
+        ("app/src/main/kotlin/Board.kt", "fun kept(): Int {\n    return 1\n}\n"),
+        ("app/src/androidTest/kotlin/Helper.kt", "fun helper(): Int {\n    return 1\n}\n"),
+    ),
+    "fsharp": (
+        "Demo.Tests/App",
+        ("Demo/Board.fs", "module Demo.Board\n\nlet kept x = x + 1\n"),
+        ("Demo.Tests/Helper.fs", "module Demo.Helper\n\nlet helper x = x + 1\n"),
+    ),
+}
+
+
+def _project_in_test_folder_name(tmp_path, language):
+    outer, source, test = _PROJECTS_IN_TEST_FOLDER_NAMES[language]
+    root = tmp_path / outer
+    for relative, text in (source, test):
+        _write(root, relative, text)
+    return root, source[0], test[0]
+
+
+@pytest.mark.parametrize("language", sorted(_PROJECTS_IN_TEST_FOLDER_NAMES))
+def test_a_project_inside_a_test_folder_name_keeps_its_sources_but_not_its_tests(
+    tmp_path, language
+):
+    root, source, _test = _project_in_test_folder_name(tmp_path, language)
+    assert iter_source_files([root]) == [(root / source).resolve()]
+
+
+def test_changed_selection_keeps_sources_of_a_project_inside_a_test_folder_name(
+    tmp_path, monkeypatch
+):
+    root, source, test = _project_in_test_folder_name(tmp_path, "python")
+    status = f"?? {source}\0?? {test}\0"
+    monkeypatch.setattr("crapper.cli.subprocess.run", _git_status(root, status))
+    assert run(["--root", str(root), "--no-coverage", "--changed"]) == 0
+    text = (root / ".metrics" / "crap.edn").read_text(encoding="utf-8")
+    assert ':name "kept"' in text
+    assert "helper" not in text
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["tests"],
+        ["app/src/androidTest"],
+        ["-s", "app/src/androidTest"],
+        ["-s", "app/src/androidTest/kotlin"],
+        ["Pods/Lib"],
+        ["-s", "Pods/Lib"],
+    ],
+)
+def test_a_path_inside_a_test_or_build_folder_of_the_project_selects_nothing(
+    tmp_path, monkeypatch, args
+):
+    for relative in (
+        "tests/helpers.py",
+        "app/src/androidTest/kotlin/Helper.kt",
+        "Pods/Lib/Lib.swift",
+    ):
+        _write(tmp_path, relative, "x\n")
+    monkeypatch.chdir(tmp_path)
+    assert select_files(parse_args(["--root", str(tmp_path), *args])) == []
+
+
+def test_a_source_root_named_src_still_skips_its_kotlin_test_source_sets(tmp_path, monkeypatch):
+    _write(tmp_path, "app/src/main/kotlin/Board.kt", "fun kept() = 1\n")
+    _write(tmp_path, "app/src/androidTest/kotlin/Helper.kt", "fun helper() = 1\n")
+    monkeypatch.chdir(tmp_path)
+    selected = select_files(parse_args(["--root", str(tmp_path), "-s", "app/src"]))
+    assert selected == [(tmp_path / "app/src/main/kotlin/Board.kt").resolve()]
+
+
 def test_threshold_equal_to_the_score_is_allowed(tmp_path):
     _write(tmp_path, "src/demo/core.clj", "(ns demo.core)\n\n(defn choose [] 1)\n")
     lcov = tmp_path / "target" / "coverage" / "lcov.info"
@@ -540,3 +645,13 @@ def test_changed_functions_reports_nothing_for_an_edit_outside_every_function(tm
     assert run(["--root", str(tmp_path), "--no-coverage", "--changed-functions"]) == 0
     assert "kept" not in capsys.readouterr().out
     assert ':name "kept"' in (tmp_path / ".metrics" / "crap.edn").read_text(encoding="utf-8")
+
+
+def test_a_directory_outside_the_project_root_is_judged_from_itself(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    other = tmp_path / "tests" / "app"
+    _write(other, "src/core.py", "def kept():\n    return 1\n")
+    _write(other, "tests/helpers.py", "def helper():\n    return 1\n")
+    selected = select_files(parse_args(["--root", str(project), str(other)]))
+    assert selected == [(other / "src/core.py").resolve()]

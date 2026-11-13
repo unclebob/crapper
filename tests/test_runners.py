@@ -353,6 +353,15 @@ def test_vitest_include_skips_a_file_outside_the_package(tmp_path):
     assert _vitest_includes(package, [package / "src" / "app.ts", outside]) == ["src/app.ts"]
 
 
+def test_vitest_include_of_a_package_inside_a_test_folder_name_skips_only_its_tests(tmp_path):
+    from crapper.runners import _vitest_includes
+
+    package = tmp_path / "spec" / "web"
+    source = _write(package, "src/app.ts", "export const n = 1\n")
+    helper = _write(package, "src/__tests__/helpers.ts", "export const h = 1\n")
+    assert _vitest_includes(package, [source, helper]) == ["src/app.ts"]
+
+
 def test_nested_module_coverage_report_is_slugged(tmp_path):
     module = tmp_path / "src-tauri"
     module.mkdir()
@@ -386,6 +395,13 @@ def test_pytest_detection_and_the_unittest_fallback(tmp_path, monkeypatch, capsy
 def test_python_sources_ignore_a_file_outside_the_package(tmp_path):
     inside = _write(tmp_path, "src/app.py", "def run():\n    return 1\n")
     assert python_sources(tmp_path, [inside, Path("/tmp/crapper-outside.py")]) == "src"
+
+
+def test_python_sources_of_a_package_inside_a_test_folder_name_skip_only_its_tests(tmp_path):
+    package = tmp_path / "tests" / "app"
+    inside = _write(package, "src/app.py", "def run():\n    return 1\n")
+    helper = _write(package, "tests/helpers.py", "def help():\n    return 1\n")
+    assert python_sources(package, [inside, helper]) == "src"
 
 
 def test_missing_python_module_is_installed(tmp_path, monkeypatch):
