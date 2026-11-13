@@ -129,6 +129,19 @@ def test_jacoco_skips_methods_without_an_instruction_counter():
     assert found["demo.pkg.Board#bad"][0].line == 0
 
 
+def test_a_fresh_go_profile_is_not_mixed_with_an_older_one(tmp_path):
+    fresh = tmp_path / "target" / "coverage" / "go" / "coverage.out"
+    fresh.parent.mkdir(parents=True)
+    fresh.write_text("mode: set\nboard.go:1.1,2.2 1 1\nboard.go:3.1,4.2 1 1\n", encoding="utf-8")
+    old = "mode: set\nboard.go:1.1,2.2 1 0\nboard.go:3.1,4.2 1 0\nother.go:1.1,2.2 1 1\n"
+    (tmp_path / "coverage.out").write_text(old, encoding="utf-8")
+    (tmp_path / "target" / "coverage" / "coverage.out").write_text(old, encoding="utf-8")
+    profile = load_bundle(tmp_path).go_profile
+    assert go_percent(profile, "board.go", 1, 4) == 100.0
+    # A file only an older profile names is still read from it.
+    assert go_percent(profile, "other.go", 1, 2) == 100.0
+
+
 def test_missing_go_profile_is_na():
     assert go_percent(None, "board.go", 1, 3) is None
 

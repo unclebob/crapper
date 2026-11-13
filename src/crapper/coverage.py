@@ -544,17 +544,20 @@ def _merge_lcov(root: Path) -> dict[str, dict[int, tuple[int, int]]]:
 
 
 def _merge_go(root: Path) -> dict[str, list[tuple[int, int, int, int]]]:
-    paths = [
-        root / "target" / "coverage" / "coverage.out",
-        root / "target" / "coverage" / "go" / "coverage.out",
-        root / "coverage.out",
-    ]
+    """Each file's segments from one profile: crapper's own first, then
+    crap4go's, then the root's. Adding a file's segments from two profiles
+    would average a fresh run with an old one."""
+
+    paths = [root / "target" / "coverage" / "go" / "coverage.out"]
     paths.extend(root.glob("*/target/coverage/go/coverage.out"))
     paths.extend(root.glob("*/*/target/coverage/go/coverage.out"))
+    paths.append(root / "target" / "coverage" / "coverage.out")
+    paths.append(root / "coverage.out")
     merged: dict[str, list[tuple[int, int, int, int]]] = {}
     for text in _merge_texts(paths):
         for key, segments in parse_go_profile(text).items():
-            merged.setdefault(key, []).extend(segments)
+            if key not in merged:
+                merged[key] = segments
     return merged
 
 
