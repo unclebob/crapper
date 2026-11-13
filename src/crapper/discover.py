@@ -9,6 +9,7 @@ EXTENSIONS = {
     ".cljs": "clojure",
     ".bb": "clojure",
     ".java": "java",
+    ".dart": "dart",
     ".go": "go",
     ".ts": "typescript",
     ".tsx": "typescript",
@@ -40,9 +41,11 @@ SKIP_DIRS = {
     "testdata",
     "__pycache__",
     ".clj-kondo",
+    ".dart_tool",
 }
 
 TEST_DIRS = {"test", "tests", "spec", "specs", "__tests__"}
+DART_TEST_DIRS = {"integration_test", "test_driver"}
 
 GO_TEST_SUFFIX = "_test.go"
 CLOJURE_TEST_SUFFIXES = ("_test.clj", "_test.cljc", "_test.cljs", "_test.bb")
@@ -66,18 +69,40 @@ JS_TEST_SUFFIXES = (
 )
 
 
+DART_TEST_SUFFIX = "_test.dart"
+DART_GENERATED_SUFFIXES = (
+    ".g.dart",
+    ".freezed.dart",
+    ".mocks.dart",
+    ".gr.dart",
+    ".config.dart",
+    ".pb.dart",
+    ".pbenum.dart",
+    ".pbjson.dart",
+    ".pbserver.dart",
+)
+
+
 def language_of(path: str | Path) -> str | None:
     file_path = Path(path)
     name = file_path.name
-    if name.endswith(".d.ts"):
+    if name.endswith(".d.ts") or name.endswith(DART_GENERATED_SUFFIXES):
         return None
     return EXTENSIONS.get(file_path.suffix)
+
+
+def _dart_test(file_path: Path) -> bool:
+    return file_path.name.endswith(DART_TEST_SUFFIX) or any(
+        part in DART_TEST_DIRS for part in file_path.parts
+    )
 
 
 def is_test_file(path: str | Path) -> bool:
     file_path = Path(path)
     name = file_path.name
     if name.endswith(GO_TEST_SUFFIX):
+        return True
+    if file_path.suffix == ".dart" and _dart_test(file_path):
         return True
     if name.endswith(CLOJURE_TEST_SUFFIXES):
         return True

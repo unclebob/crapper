@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import unquote
 
+from crapper.dart_coverage import absolute_sources, package_reports
 from crapper.model import Function
 from crapper.runners import nearest_marker
 
@@ -538,7 +539,14 @@ def _merge_texts(paths: list[Path]) -> list[str]:
 
 def _merge_lcov(root: Path) -> dict[str, dict[int, tuple[int, int]]]:
     merged: dict[str, dict[int, tuple[int, int]]] = {}
-    for text in _merge_texts(_lcov_paths(root)):
+    dart = package_reports(root)
+    skipped = {report.resolve() for _, report in dart}
+    paths = [path for path in _lcov_paths(root) if path.resolve() not in skipped]
+    # A package's own `flutter test --coverage` report is the fallback; a
+    # fresh report under target/ wins.
+    for package, report in dart:
+        merged.update(parse_lcov(absolute_sources(_read(report) or "", package)))
+    for text in _merge_texts(paths):
         merged.update(parse_lcov(text))
     return merged
 

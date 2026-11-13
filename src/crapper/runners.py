@@ -13,6 +13,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from crapper.dart_coverage import dart_command, rewrite_report
 from crapper.discover import is_test_file, language_of
 
 _MAVEN = [
@@ -283,8 +284,15 @@ def _coverage_report(root: Path, module: Path, language: str) -> Path:
     module = module.resolve()
     if module == root:
         return root / "target" / "coverage" / language / "lcov.info"
-    slug = module.relative_to(root).as_posix().replace("/", "__")
-    return root / "target" / "coverage" / language / slug / "lcov.info"
+    return root / "target" / "coverage" / language / _module_slug(root, module) / "lcov.info"
+
+
+def _module_slug(root: Path, module: Path) -> str:
+    """A module outside the root keeps its whole path, so two of them never collide."""
+
+    if module.is_relative_to(root):
+        return module.relative_to(root).as_posix().replace("/", "__")
+    return "external__" + module.as_posix().strip("/").replace("/", "__")
 
 
 def rust_modules(root: Path, files: list[Path]) -> list[Path]:
@@ -562,6 +570,27 @@ def _cover_rust(root: Path, files: list[Path]) -> None:
             _warn(f"Rust coverage exited {code} in {module}. Rust coverage will score 0%.")
 
 
+def _cover_dart(root: Path, files: list[Path]) -> None:
+    packages = _modules_with(files, ".dart", "pubspec.yaml", root)
+    if not packages:
+        _warn("No pubspec.yaml; skipping Dart coverage.")
+        return
+    for package in packages:
+        report = _coverage_report(root, package, "dart")
+        command = dart_command(package, report)
+        _prepare_report(report)
+        if shutil.which(command[0]) is None:
+            _warn(
+                f"{command[0]} is not on PATH. No new Dart coverage in {package}; "
+                "its coverage/lcov.info is read if present, else it scores 0%."
+            )
+            continue
+        code = run_shell(command, package)
+        if code != 0:
+            _warn(f"Dart coverage exited {code} in {package}. Coverage was kept if written.")
+        rewrite_report(report, package)
+
+
 def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
     """Generate coverage reports for the languages present in `files`.
 
@@ -593,4 +622,6 @@ def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
         _cover_python(root, files)
     if "rust" in languages:
         _cover_rust(root, files)
+    if "dart" in languages:
+        _cover_dart(root, files)
     return 0

@@ -52,6 +52,7 @@ uml-viewer groups entries by `:namespace` and joins each operation on `:name`. `
 | TypeScript | the dotted module path, or `module.Class` | the function or method name |
 | Rust | `crate::module`, or `crate::module::Type` | the function or method name |
 | Python | the dotted module path, or `module.Class` | the function or method name |
+| Dart | the package name plus the path under `lib/` (`gap_core.src.models.user`), or `module.Type` | the function or method name; `size` / `size=` for a getter / setter, `operator +`, a factory's name |
 
 Rename or move is a new entry. There is no identity matching across runs.
 
@@ -69,6 +70,8 @@ Rust counts `if`, loops, each `match` arm, `?`, and `&&` / `||`. `mod tests` is 
 
 Python counts `if`, `elif`, `for`, `while`, `except`, each `match` case, a comprehension filter, a conditional expression, and each `and` / `or`. Nested functions stay inside the enclosing function. Coverage is LCOV from `coverage.py`, running pytest when the project uses it and `unittest` otherwise. `coverage` and `pytest` are installed into the project's interpreter when they are missing.
 
+Dart (`.dart`) counts `if`, `for`, `while`, `do`, `catch`, `?:`, each `switch` case and `default`, each `switch` expression arm, each `&&` / `||`, `??`, `?.`, and collection `if` / `for`. Entries are top-level functions, methods of classes, mixins, extensions and enums, getters, setters, operators, and factory constructors (`factory A.fromJson` is `fromJson`, `factory A` is `A`). Generative constructors, abstract and `external` members are not entries; local functions and closures count toward the function that holds them. The namespace comes from the nearest `pubspec.yaml`: its `name` plus the path under `lib/`, or under the package for files outside `lib/` (`demo.bin.tool`). Generated files (`*.g.dart`, `*.freezed.dart`, `*.mocks.dart`, `*.gr.dart`, `*.config.dart`, `*.pb*.dart`), `.dart_tool`, `test/`, `integration_test/`, `test_driver/`, and `*_test.dart` are skipped. Coverage is LCOV. In a workspace with several packages, each package runs its own tests; `flutter test` writes paths relative to the package, and crapper makes them absolute so `lib/a.dart` in two packages stays two files. `--use-existing-coverage` also reads each package's `coverage/lcov.info`, which `flutter test --coverage` writes by default. In a Flutter workspace, `flutter test` re-resolves dependencies and may rewrite the workspace's `pubspec.lock`; check `git status` after a run and restore the file if the change is not wanted. A package outside `--root` is allowed: its report goes under `target/coverage/dart/external__<absolute path>/`. The Dart VM marks only executable lines, so a line like `return 1;` may have no hit count; the function's percentage is over the lines that have one.
+
 ## Coverage commands
 
 By default a run deletes the previous report for each language it is about to measure and regenerates it:
@@ -81,6 +84,7 @@ By default a run deletes the previous report for each language it is about to me
 | TypeScript | `npm run coverage`, or Vitest `--coverage`, or `npx c8 ... npm test` | `coverage/lcov.info` or `target/coverage/typescript/lcov.info` |
 | Rust | `cargo llvm-cov` or `cargo tarpaulin`, per Cargo package | `target/coverage/rust/lcov.info` |
 | Python | `coverage run` with pytest or unittest, then `coverage lcov` | `target/coverage/python/lcov.info` |
+| Dart | `flutter test --coverage --coverage-path ...` when `pubspec.yaml` depends on `sdk: flutter`, else `dart test --coverage-path ...`, per package | `target/coverage/dart/<package>/lcov.info` |
 
 A missing tool or a failed test run scores that language at 0% and still writes the snapshot. Pass `--coverage-command` to replace those defaults with one command of your own. `--no-coverage` is the run that leaves coverage and CRAP as N/A.
 

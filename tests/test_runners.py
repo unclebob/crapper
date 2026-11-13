@@ -358,6 +358,16 @@ def test_nested_module_coverage_report_is_slugged(tmp_path):
     assert report == tmp_path / "target" / "coverage" / "rust" / "src-tauri" / "lcov.info"
 
 
+def test_module_outside_the_root_gets_a_report_inside_the_root(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    module = tmp_path / "elsewhere" / "pkg"
+    module.mkdir(parents=True)
+    report = _coverage_report(root, module, "dart")
+    slug = module.resolve().as_posix().strip("/").replace("/", "__")
+    assert report == root.resolve() / "target" / "coverage" / "dart" / f"external__{slug}" / "lcov.info"
+
+
 def test_prepare_report_replaces_an_existing_directory(tmp_path):
     report = tmp_path / "target" / "coverage" / "typescript" / "lcov.info"
     report.parent.mkdir(parents=True)
