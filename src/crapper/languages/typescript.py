@@ -329,6 +329,48 @@ def _append_arrows(found, data, node, module, path) -> None:
         )
 
 
+def _append_field(found, data, node, module, path) -> None:
+    """A class field that holds a function: `handle = (event) => {...}`."""
+
+    ident = child_of_type(node, "property_identifier", "private_property_identifier")
+    value = child_of_type(node, *_CALLBACKS)
+    classes = _class_names(data, node)
+    if ident is None or value is None or not classes:
+        return
+    _append(
+        found,
+        node,
+        name=node_text(data, ident),
+        namespace=".".join([module, *classes]),
+        complexity=_complexity(data, value),
+        start_line=start_line(node),
+        end_line=end_line(node),
+        path=path,
+        language="typescript",
+    )
+
+
+def _append_default(found, data, node, module, path) -> None:
+    """`export default function () {...}`, or an arrow, which has no name of its own."""
+
+    if child_of_type(node, "default") is None:
+        return
+    value = child_of_type(node, *_CALLBACKS)
+    if value is None:
+        return
+    _append(
+        found,
+        value,
+        name="default",
+        namespace=module,
+        complexity=_complexity(data, value),
+        start_line=start_line(value),
+        end_line=end_line(value),
+        path=path,
+        language="typescript",
+    )
+
+
 def _route_label(method: str, path: str | None) -> str:
     label = method.upper()
     if path:
@@ -390,8 +432,12 @@ def functions_in_source(
             _append_function(found, data, node, module, path)
         elif node.type == "method_definition":
             _append_method(found, data, node, module, path)
-        elif node.type == "lexical_declaration":
+        elif node.type in {"lexical_declaration", "variable_declaration"}:
             _append_arrows(found, data, node, module, path)
+        elif node.type in {"public_field_definition", "field_definition"}:
+            _append_field(found, data, node, module, path)
+        elif node.type == "export_statement":
+            _append_default(found, data, node, module, path)
         elif node.type == "call_expression":
             _collect_routes(routes, data, node)
     _append_routes(found, routes, data, module, path)

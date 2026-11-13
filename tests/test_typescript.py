@@ -41,6 +41,54 @@ function outer() {
     ]
 
 
+def test_every_top_level_function_shape_is_an_entry():
+    source = """
+export var viaVar = (x: number) => (x > 0 ? 1 : 0);
+
+var legacy = function (x: number) {
+  if (x > 0) return 1;
+  return 0;
+};
+
+export class Box {
+  field = (x: number) => (x > 0 ? 1 : 0);
+  count = 0;
+}
+
+export default function (x: number) {
+  if (x > 0) return 1;
+  return 0;
+}
+
+function outer() {
+  const local = { inner(n: number) { return n ? 1 : 0; } };
+  return local.inner(1);
+}
+"""
+    functions = functions_in_source(source, "src/demo/shapes.ts", "/proj")
+    assert [(fn.namespace, fn.name, fn.complexity) for fn in functions] == [
+        ("demo.shapes", "viaVar", 2),
+        ("demo.shapes", "legacy", 2),
+        ("demo.shapes.Box", "field", 2),
+        ("demo.shapes", "default", 2),
+        ("demo.shapes", "outer", 2),
+    ]
+
+
+def test_every_top_level_function_shape_is_an_entry_in_javascript():
+    source = """
+var viaVar = (x) => (x > 0 ? 1 : 0);
+class Box {
+  field = (x) => (x > 0 ? 1 : 0);
+}
+"""
+    functions = functions_in_source(source, "src/demo/shapes.js", "/proj")
+    assert [(fn.namespace, fn.name, fn.complexity) for fn in functions] == [
+        ("demo.shapes", "viaVar", 2),
+        ("demo.shapes.Box", "field", 2),
+    ]
+
+
 def test_tsx_counts_jsx_logic():
     source = """
 export function View(ok: boolean, ready: boolean) {
