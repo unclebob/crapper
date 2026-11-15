@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from crapper.discover import iter_source_files, language_of
 
 
@@ -122,3 +124,83 @@ class A {
 }
 """
     assert where(source) == [("a.SampleKt", "outer")]
+
+
+def cc(body: str, params: str = "a: Boolean, b: Boolean, n: Int, x: Int?") -> int:
+    source = f"fun f({params}): Int {{\n{body}\n    return 0\n}}\n"
+    [found] = entries(source)
+    return found.complexity
+
+
+def test_straight_line_code_has_complexity_one():
+    assert cc("val y = 1") == 1
+
+
+DECISIONS = {
+    "if": ("if (a) { println() }", 2),
+    "else if counts once more, plain else adds nothing": (
+        "if (a) { println() } else if (b) { println() } else { println() }",
+        3,
+    ),
+    "for": ("for (i in 1..n) { println(i) }", 2),
+    "while": ("while (a) { println() }", 2),
+    "do-while": ("do { println() } while (a)", 2),
+    "catch": ("try { println() } catch (e: Exception) { println(e) }", 2),
+    "elvis": ("val y = x ?: 0", 2),
+    "and": ("val y = a && b", 2),
+    "or": ("val y = a || b", 2),
+    "when branch with a condition": ("when (n) { 1 -> println() }", 2),
+    "if expression": ("val y = if (a) 1 else 2", 2),
+}
+
+
+@pytest.mark.parametrize(("body", "expected"), DECISIONS.values(), ids=DECISIONS.keys())
+def test_each_decision_adds_to_complexity(body: str, expected: int):
+    assert cc(body) == expected
+
+
+def test_each_conditioned_when_branch_counts_and_else_does_not():
+    assert cc("when (n) { 1, 2 -> println(); in 3..4 -> println(); else -> println() }") == 3
+
+
+def test_when_without_subject_counts_each_conditioned_branch():
+    assert cc("when { a -> println(); b -> println(); else -> println() }") == 3
+
+
+def test_safe_call_is_not_a_decision():
+    assert cc("val y = x?.toString()") == 1
+
+
+def test_finally_and_try_alone_add_nothing():
+    assert cc("try { println() } finally { println() }") == 1
+
+
+def test_decisions_nest_and_chain_in_one_expression():
+    assert cc("if (a && b || a) { for (i in 1..n) { if (b) { println() } } }") == 6
+
+
+def test_lambda_and_local_function_decisions_count_toward_the_function():
+    body = "val g = { v: Int -> if (v > 0) 1 else 2 }\nfun local() { if (a) println() }"
+    assert cc(body) == 3
+
+
+def test_anonymous_object_and_local_class_add_nothing():
+    body = (
+        "val o = object { fun m() { if (a) println() } }\n"
+        "class Local { fun n() { if (b) println() } }"
+    )
+    assert cc(body) == 1
+
+
+def test_decisions_in_a_member_function_do_not_leak_to_its_neighbours():
+    source = "class A {\n    fun one(a: Boolean) { if (a) {} }\n    fun two() {}\n}\n"
+    assert [(f.name, f.complexity) for f in entries(source)] == [("one", 2), ("two", 1)]
+
+
+def test_accessor_and_constructor_complexity_are_their_own():
+    source = """class A() {
+    val p: Int get() { return if (true) 1 else 2 }
+    constructor(x: Int) : this() { if (x > 0 && x < 9) {} }
+}
+"""
+    assert [(f.name, f.complexity) for f in entries(source)] == [("p.get", 2), ("A", 3)]

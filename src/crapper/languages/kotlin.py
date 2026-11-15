@@ -10,6 +10,13 @@ the `@file:JvmName`. A companion object's members belong to the enclosing class
 (JaCoCo reports `Class$Companion`; coverage joins on source lines, not class
 names, so the two never need matching). Nested classes chain as `pkg.Outer.Inner`.
 
+Decisions: `if` (each `else if` too), `for`, `while`, `do-while`, `catch`, the
+elvis `?:`, each `when` branch that has a condition (`else` adds nothing), and
+each `&&` / `||`. The safe call `?.` is not counted: it is a null guard, not a
+branch the author wrote. Lambdas and local functions stay inside the enclosing
+function, so their decisions count toward it. Anonymous objects and local
+classes are omitted and add nothing.
+
 Local functions, lambdas and anonymous objects are never entries: the walk does
 not descend into a function body, lambda, object literal or `init` block.
 """
@@ -29,16 +36,29 @@ from crapper.model import Function
 _OWNERS = {"class_declaration", "object_declaration"}
 _ENTRIES = {"function_declaration", "secondary_constructor", "getter", "setter"}
 _NOT_WALKED = {"lambda_literal", "object_literal", "anonymous_function", "anonymous_initializer"}
+_DECISIONS = {
+    "if_expression",
+    "for_statement",
+    "while_statement",
+    "do_while_statement",
+    "catch_block",
+    "elvis_expression",
+    "conjunction_expression",
+    "disjunction_expression",
+}
+_OMITTED = {"object_literal"} | _OWNERS
 _JVM_NAME = re.compile(r'@file:JvmName\(\s*"([^"]+)"')
 _NOT_IDENTIFIER = re.compile(r"\W")
 
 
 def _is_decision(node) -> bool:
-    return False
+    if node.type == "when_entry":
+        return child_of_type(node, "when_condition") is not None
+    return node.type in _DECISIONS
 
 
 def _skip(node) -> bool:
-    return False
+    return node.type in _OMITTED
 
 
 def _package_name(data: bytes, root) -> str:
