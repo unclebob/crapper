@@ -11,6 +11,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from crapper.discover import is_test_file, language_of
@@ -22,6 +23,19 @@ _MAVEN = [
     "test",
     "org.jacoco:jacoco-maven-plugin:0.8.12:report",
 ]
+
+GRADLE_REPORT = "build/reports/jacoco/test/jacocoTestReport.xml"
+_GRADLE_MARKERS = ("settings.gradle.kts", "settings.gradle", "build.gradle.kts", "build.gradle")
+_GRADLE_INIT_SCRIPT = """\
+allprojects {
+    pluginManager.withPlugin('java') {
+        apply plugin: 'jacoco'
+        tasks.withType(org.gradle.testing.jacoco.tasks.JacocoReport).configureEach {
+            reports { xml.required = true }
+        }
+    }
+}
+"""
 
 
 def _warn(message: str) -> None:
@@ -455,6 +469,67 @@ def _cover_java(root: Path, files: list[Path]) -> None:
             _warn(f"Java coverage exited {code} in {module}. Java coverage will score 0%.")
 
 
+def gradle_init_script() -> str:
+    """Gradle init script that adds JaCoCo XML reports without editing the build."""
+
+    return _GRADLE_INIT_SCRIPT
+
+
+def gradle_command(module: Path, script: Path, which=shutil.which) -> list[str] | None:
+    wrapper = module / "gradlew"
+    if wrapper.is_file():
+        launcher = str(wrapper)
+    else:
+        launcher = which("gradle")
+    if not launcher:
+        return None
+    return [launcher, "test", "jacocoTestReport", "--init-script", str(script)]
+
+
+def gradle_reports(root: Path) -> list[Path]:
+    """JaCoCo XML reports of the root project and of subprojects two levels down."""
+
+    found = [root / GRADLE_REPORT]
+    found.extend(root.glob(f"*/{GRADLE_REPORT}"))
+    found.extend(root.glob(f"*/*/{GRADLE_REPORT}"))
+    return [path for path in found if path.is_file()]
+
+
+def gradle_builds(files: list[Path], root: Path) -> list[Path]:
+    """The Gradle build directory of each Kotlin file; a settings file marks the build root."""
+
+    builds: set[Path] = set()
+    for file in files:
+        if Path(file).suffix != ".kt":
+            continue
+        for marker in _GRADLE_MARKERS:
+            build = nearest_marker(file, marker, root)
+            if build is not None:
+                builds.add(build)
+                break
+    return sorted(builds)
+
+
+def _cover_kotlin(root: Path, files: list[Path]) -> None:
+    builds = gradle_builds(files, root)
+    if not builds:
+        _warn("No Gradle build; skipping Kotlin coverage.")
+        return
+    with tempfile.TemporaryDirectory(prefix="crapper-") as scratch:
+        script = Path(scratch) / "jacoco.init.gradle"
+        script.write_text(gradle_init_script(), encoding="utf-8")
+        for build in builds:
+            command = gradle_command(build, script)
+            if command is None:
+                _warn(f"No gradlew and no gradle for {build}. Kotlin coverage will score 0%.")
+                continue
+            for report in gradle_reports(build):
+                report.unlink()
+            code = run_shell(command, build)
+            if code != 0:
+                _warn(f"Kotlin coverage exited {code} in {build}. Kotlin coverage will score 0%.")
+
+
 def _cover_go(root: Path, files: list[Path]) -> None:
     modules = _modules_with(files, ".go", "go.mod", root)
     if not modules:
@@ -585,6 +660,8 @@ def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
         _cover_clojure(root)
     if "java" in languages:
         _cover_java(root, files)
+    if "kotlin" in languages:
+        _cover_kotlin(root, files)
     if "go" in languages:
         _cover_go(root, files)
     if "typescript" in languages:

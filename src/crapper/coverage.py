@@ -15,7 +15,7 @@ from pathlib import Path
 from urllib.parse import unquote
 
 from crapper.model import Function
-from crapper.runners import nearest_marker
+from crapper.runners import gradle_reports, nearest_marker
 
 _SPAN = re.compile(
     r'<span[^>]*title="(\d+) out of (\d+) forms covered"[^>]*>\s*(\d+)&nbsp;'
@@ -599,10 +599,8 @@ def _merge_jacoco(root: Path) -> dict[str, list[JacocoMethod]]:
 
 
 def _merge_jacoco_lines(root: Path) -> dict[str, dict[int, tuple[int, int]]]:
-    gradle = "build/reports/jacoco/test/jacocoTestReport.xml"
-    paths = [root / gradle, root / "target" / "site" / "jacoco" / "jacoco.xml"]
-    paths.extend(root.glob(f"*/{gradle}"))
-    paths.extend(root.glob(f"*/*/{gradle}"))
+    paths = gradle_reports(root)
+    paths.append(root / "target" / "site" / "jacoco" / "jacoco.xml")
     merged: dict[str, dict[int, tuple[int, int]]] = {}
     for text in _merge_texts(paths):
         merged.update(parse_jacoco_lines(text))
