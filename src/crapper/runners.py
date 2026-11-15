@@ -519,12 +519,12 @@ def _cover_kotlin(root: Path, files: list[Path]) -> None:
         script = Path(scratch) / "jacoco.init.gradle"
         script.write_text(gradle_init_script(), encoding="utf-8")
         for build in builds:
+            for report in gradle_reports(build):
+                report.unlink()
             command = gradle_command(build, script)
             if command is None:
                 _warn(f"No gradlew and no gradle for {build}. Kotlin coverage will score 0%.")
                 continue
-            for report in gradle_reports(build):
-                report.unlink()
             code = run_shell(command, build)
             if code != 0:
                 _warn(f"Kotlin coverage exited {code} in {build}. Kotlin coverage will score 0%.")
