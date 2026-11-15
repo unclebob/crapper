@@ -204,3 +204,14 @@ def test_accessor_and_constructor_complexity_are_their_own():
 }
 """
     assert [(f.name, f.complexity) for f in entries(source)] == [("p.get", 2), ("A", 3)]
+
+
+def test_a_package_written_with_spaces_is_still_the_dotted_name():
+    assert where("package a . b\nfun f() = 1\n") == [("a.b.SampleKt", "f")]
+
+
+def test_broken_code_never_makes_an_entry_for_what_it_cannot_name():
+    assert where("get() = 1\nfun a() {}\n") == [("SampleKt", "a")]
+    assert where("class { fun f() = 1 }") == []
+    assert where("constructor(x: Int) {}") == []
+    assert where("class A { get() { return 1 } }") == []
