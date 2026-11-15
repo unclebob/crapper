@@ -66,3 +66,11 @@ def test_a_missing_gradle_scores_zero_and_still_writes(tmp_path, monkeypatch, re
     monkeypatch.setattr("crapper.runners.shutil.which", lambda name: None)
     assert run(["--root", str(tmp_path)]) == 0
     assert ":coverage 0.0" in snapshot(tmp_path)
+
+
+def test_help_names_kotlin_its_coverage_and_its_namespace(capsys):
+    assert run(["--help"]) == 0
+    text = capsys.readouterr().out
+    assert "Kotlin (.kt)" in text
+    assert "jacocoTestReport" in text
+    assert "package.<File>Kt" in text

@@ -1,6 +1,6 @@
 # crapper
 
-CRAP scores for Clojure, Java, Go, TypeScript, Rust, and Python. One run detects the language of each source file, applies that language's complexity and coverage rules, and writes the snapshot [uml-viewer](https://github.com/unclebob/uml-viewer) already reads.
+CRAP scores for Clojure, Java, Go, TypeScript, Rust, Python, and Kotlin. One run detects the language of each source file, applies that language's complexity and coverage rules, and writes the snapshot [uml-viewer](https://github.com/unclebob/uml-viewer) already reads.
 
 The formula is the one from [crap4clj](https://github.com/unclebob/crap4clj), [crap4java](https://github.com/unclebob/crap4java), and [crap4go](https://github.com/unclebob/crap4go):
 
@@ -52,6 +52,7 @@ uml-viewer groups entries by `:namespace` and joins each operation on `:name`. `
 | TypeScript | the dotted module path, or `module.Class` | the function or method name |
 | Rust | `crate::module`, or `crate::module::Type` | the function or method name |
 | Python | the dotted module path, or `module.Class` | the function or method name |
+| Kotlin | `package.Class`, `package.Outer.Inner`, or `package.<File>Kt` for top-level functions | the function name, `Class` for a secondary constructor, `prop.get` / `prop.set` for an accessor |
 
 Rename or move is a new entry. There is no identity matching across runs.
 
@@ -69,6 +70,8 @@ Rust counts `if`, loops, each `match` arm, `?`, and `&&` / `||`. `mod tests` is 
 
 Python counts `if`, `elif`, `for`, `while`, `except`, each `match` case, a comprehension filter, a conditional expression, and each `and` / `or`. Nested functions stay inside the enclosing function. Coverage is LCOV from `coverage.py`, running pytest when the project uses it and `unittest` otherwise. `coverage` and `pytest` are installed into the project's interpreter when they are missing.
 
+Kotlin follows Java's rules, adapted: `if` (each `else if`), `for`, `while`, `do`-`while`, `catch`, the elvis `?:`, each `when` branch that has a condition (the `else` branch adds nothing), and `&&` / `||`. The safe call `?.` is not counted: it is a null guard, not a branch the author wrote. Entries are top-level functions, member functions with a body, secondary constructors, and property accessors with a body. Lambdas and local functions stay inside the enclosing function and their decisions count toward it; anonymous objects and local classes are omitted. A top-level function's namespace is the JVM class name, `package.<File>Kt` (`@file:JvmName("X")` is honoured); members of a `companion object` belong to the enclosing class. `*.gradle.kts` build scripts are not scanned. Coverage is JaCoCo's per-line instruction counters (`<line mi ci>` of each source file) summed over the function's lines, so lambdas, companion objects, default-argument stubs, and inlined code count toward the line the author wrote them on. A source file the report does not list scores 0%.
+
 ## Coverage commands
 
 By default a run deletes the previous report for each language it is about to measure and regenerates it:
@@ -81,8 +84,11 @@ By default a run deletes the previous report for each language it is about to me
 | TypeScript | `npm run coverage`, or Vitest `--coverage`, or `npx c8 ... npm test` | `coverage/lcov.info` or `target/coverage/typescript/lcov.info` |
 | Rust | `cargo llvm-cov` or `cargo tarpaulin`, per Cargo package | `target/coverage/rust/lcov.info` |
 | Python | `coverage run` with pytest or unittest, then `coverage lcov` | `target/coverage/python/lcov.info` |
+| Kotlin | `./gradlew test jacocoTestReport --init-script <script>` (`gradle` when there is no wrapper), at the build root | `build/reports/jacoco/test/jacocoTestReport.xml` (also in subprojects) |
 
 A missing tool or a failed test run scores that language at 0% and still writes the snapshot. Pass `--coverage-command` to replace those defaults with one command of your own. `--no-coverage` is the run that leaves coverage and CRAP as N/A.
+
+The Kotlin init script is written to a temporary directory and removed afterwards, so the project's build files are never edited. It applies the `jacoco` plugin to every project that applies the `java` plugin (Kotlin/JVM does) and turns on `jacocoTestReport`'s XML output. Android modules without the `java` plugin are not covered. The build root is the nearest directory with `settings.gradle(.kts)`, else with `build.gradle(.kts)`.
 
 ## Development
 
