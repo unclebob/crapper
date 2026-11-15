@@ -441,7 +441,8 @@ def _modules_with(files: list[Path], suffix: str, marker: str, root: Path) -> li
     return sorted(modules)
 
 
-def _cover_clojure(root: Path) -> None:
+def _cover_clojure(root: Path, files: list[Path]) -> None:
+    del files
     if not (root / "deps.edn").is_file() and not (root / "bb.edn").is_file():
         _warn("No deps.edn or bb.edn; skipping Clojure coverage.")
         return
@@ -637,6 +638,17 @@ def _cover_rust(root: Path, files: list[Path]) -> None:
             _warn(f"Rust coverage exited {code} in {module}. Rust coverage will score 0%.")
 
 
+_COVER = (
+    ("clojure", _cover_clojure),
+    ("java", _cover_java),
+    ("kotlin", _cover_kotlin),
+    ("go", _cover_go),
+    ("typescript", _cover_typescript),
+    ("python", _cover_python),
+    ("rust", _cover_rust),
+)
+
+
 def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
     """Generate coverage reports for the languages present in `files`.
 
@@ -656,18 +668,7 @@ def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
         return code
 
     languages = _languages_in(files)
-    if "clojure" in languages:
-        _cover_clojure(root)
-    if "java" in languages:
-        _cover_java(root, files)
-    if "kotlin" in languages:
-        _cover_kotlin(root, files)
-    if "go" in languages:
-        _cover_go(root, files)
-    if "typescript" in languages:
-        _cover_typescript(root, files)
-    if "python" in languages:
-        _cover_python(root, files)
-    if "rust" in languages:
-        _cover_rust(root, files)
+    for language, cover in _COVER:
+        if language in languages:
+            cover(root, files)
     return 0
