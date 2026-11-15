@@ -20,6 +20,7 @@ EXTENSIONS = {
     ".cjs": "typescript",
     ".rs": "rust",
     ".py": "python",
+    ".kt": "kotlin",
 }
 
 SKIP_DIRS = {
