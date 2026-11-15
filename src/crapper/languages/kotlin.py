@@ -26,6 +26,7 @@ import re
 from crapper.languages.treesitter import (
     child_of_type,
     complexity,
+    enclosing_names,
     end_line,
     node_text,
     parse,
@@ -81,16 +82,7 @@ def _join(*parts: str) -> str:
 
 
 def _owner_names(data: bytes, node) -> list[str]:
-    names: list[str] = []
-    current = node.parent
-    while current is not None:
-        if current.type in _OWNERS:
-            ident = child_of_type(current, "type_identifier")
-            if ident is not None:
-                names.append(node_text(data, ident))
-        current = current.parent
-    names.reverse()
-    return names
+    return enclosing_names(data, node, _OWNERS, "type_identifier")
 
 
 def _property_of(node):

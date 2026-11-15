@@ -40,6 +40,21 @@ def child_of_type(node, *types: str):
     return None
 
 
+def enclosing_names(data: bytes, node, kinds: set[str], identifier: str) -> list[str]:
+    """Names of the enclosing declarations of `kinds`, outermost first."""
+
+    names: list[str] = []
+    current = node.parent
+    while current is not None:
+        if current.type in kinds:
+            ident = child_of_type(current, identifier)
+            if ident is not None:
+                names.append(node_text(data, ident))
+        current = current.parent
+    names.reverse()
+    return names
+
+
 def descendants(node):
     stack = [node]
     while stack:

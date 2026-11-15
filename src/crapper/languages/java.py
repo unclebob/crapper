@@ -13,6 +13,7 @@ from crapper.languages.treesitter import (
     child_of_type,
     complexity,
     end_line,
+    enclosing_names,
     node_text,
     parse,
     start_line,
@@ -66,16 +67,7 @@ def _package_name(source: str) -> str | None:
 
 
 def _type_chain(data: bytes, node) -> list[str]:
-    names: list[str] = []
-    current = node.parent
-    while current is not None:
-        if current.type in _NESTED_TYPES:
-            ident = child_of_type(current, "identifier")
-            if ident is not None:
-                names.append(node_text(data, ident))
-        current = current.parent
-    names.reverse()
-    return names
+    return enclosing_names(data, node, _NESTED_TYPES, "identifier")
 
 
 def _qualify(package: str | None, names: list[str], nested: str) -> str:
