@@ -487,17 +487,9 @@ class CoverageBundle:
 
     def percent_for(self, function: Function) -> float | None:
         if function.language == "java":
-            names = []
-            if function.jacoco_class:
-                names.append(function.jacoco_class)
-            if function.namespace not in names:
-                names.append(function.namespace)
-            return _jacoco_from_index(
-                self.jacoco or {}, names, function.name, function.start_line
-            )
+            return self._java_percent(function)
         if function.language == "kotlin":
-            lines = _lookup(self.jacoco_lines, function.path, self.source_parts)
-            return percent_for_range(lines, function.start_line, function.end_line)
+            return self._kotlin_percent(function)
         if function.language == "go":
             segments = self._go_segments(function.path)
             return _segments_percent(segments, function.start_line, function.end_line)
@@ -511,6 +503,18 @@ class CoverageBundle:
         if branched is not None:
             return branched
         return percent_for_range(record, function.start_line, function.end_line)
+
+    def _java_percent(self, function: Function) -> float | None:
+        names = []
+        if function.jacoco_class:
+            names.append(function.jacoco_class)
+        if function.namespace not in names:
+            names.append(function.namespace)
+        return _jacoco_from_index(self.jacoco or {}, names, function.name, function.start_line)
+
+    def _kotlin_percent(self, function: Function) -> float | None:
+        lines = _lookup(self.jacoco_lines, function.path, self.source_parts)
+        return percent_for_range(lines, function.start_line, function.end_line)
 
     def _go_segments(self, path: str) -> list[tuple[int, int, int, int]] | None:
         """Profile segments for one Go file: by import path, else by the longest path suffix."""
