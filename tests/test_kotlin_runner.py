@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from crapper.runners import gradle_command, gradle_init_script, gradle_reports, run_coverage
+from crapper.runners import gradle_builds, gradle_command, gradle_init_script, gradle_reports, run_coverage
 
 REPORT = "build/reports/jacoco/test/jacocoTestReport.xml"
 
@@ -38,6 +38,22 @@ def test_reports_are_found_in_the_root_and_in_subprojects_to_two_levels(tmp_path
     found = [write(tmp_path, p) for p in (REPORT, f"app/{REPORT}", f"libs/core/{REPORT}")]
     write(tmp_path, "a/b/c/" + REPORT)
     assert sorted(gradle_reports(tmp_path)) == sorted(found)
+
+
+def test_the_build_root_is_the_settings_file_else_the_nearest_build_file(tmp_path):
+    write(tmp_path, "settings.gradle.kts")
+    write(tmp_path, "app/build.gradle.kts")
+    write(tmp_path, "solo/build.gradle")
+    nested = write(tmp_path, "app/src/main/kotlin/A.kt")
+    lone = write(tmp_path / "solo", "src/B.kt")
+    elsewhere = write(tmp_path, "docs/C.java")
+    assert gradle_builds([nested, lone, elsewhere], tmp_path) == [tmp_path]
+    assert gradle_builds([lone], tmp_path / "solo") == [tmp_path / "solo"]
+    (tmp_path / "settings.gradle.kts").unlink()
+    assert gradle_builds([nested, lone, elsewhere], tmp_path) == [
+        tmp_path / "app",
+        tmp_path / "solo",
+    ]
 
 
 def run_kotlin(tmp_path, monkeypatch, *, result=0, which=None):
