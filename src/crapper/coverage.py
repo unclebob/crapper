@@ -437,12 +437,38 @@ def parse_jacoco_index(text: str) -> dict[str, list[JacocoMethod]]:
     return found
 
 
+def parse_jacoco_lines(text: str) -> dict[str, dict[int, tuple[int, int]]]:
+    """Instructions per source line, keyed `package/path/File.kt`.
+
+    Each `<line nr mi ci>` becomes `nr -> (covered, missed + covered)`, the
+    shape LCOV and Cloverage lines already have. JaCoCo credits a line to
+    whichever class compiled it, so lambdas, companions and `$default` stubs
+    all land on the line the author wrote them on.
+    """
+
+    root = ET.fromstring(_DOCTYPE.sub("", text))
+    found: dict[str, dict[int, tuple[int, int]]] = {}
+    for package in root.iter("package"):
+        directory = package.get("name", "")
+        for source in package.iter("sourcefile"):
+            key = f"{directory}/{source.get('name', '')}".lstrip("/")
+            found[key] = {
+                int(line.get("nr", "0")): (
+                    int(line.get("ci", "0")),
+                    int(line.get("ci", "0")) + int(line.get("mi", "0")),
+                )
+                for line in source.iter("line")
+            }
+    return found
+
+
 @dataclass
 class CoverageBundle:
     lcov: dict[str, dict[int, tuple[int, int]]] = field(default_factory=dict)
     go_profile: dict[str, list[tuple[int, int, int, int]]] | None = None
     jacoco: dict[str, list[JacocoMethod]] | None = None
     form_html: dict[str, dict[int, tuple[int, int]]] = field(default_factory=dict)
+    jacoco_lines: dict[str, dict[int, tuple[int, int]]] = field(default_factory=dict)
     source_parts: list[tuple[str, ...]] = field(default_factory=list)
     root: Path | None = None
 
@@ -469,6 +495,9 @@ class CoverageBundle:
             return _jacoco_from_index(
                 self.jacoco or {}, names, function.name, function.start_line
             )
+        if function.language == "kotlin":
+            lines = _lookup(self.jacoco_lines, function.path, self.source_parts)
+            return percent_for_range(lines, function.start_line, function.end_line)
         if function.language == "go":
             segments = self._go_segments(function.path)
             return _segments_percent(segments, function.start_line, function.end_line)
@@ -569,6 +598,17 @@ def _merge_jacoco(root: Path) -> dict[str, list[JacocoMethod]]:
     return merged
 
 
+def _merge_jacoco_lines(root: Path) -> dict[str, dict[int, tuple[int, int]]]:
+    gradle = "build/reports/jacoco/test/jacocoTestReport.xml"
+    paths = [root / gradle, root / "target" / "site" / "jacoco" / "jacoco.xml"]
+    paths.extend(root.glob(f"*/{gradle}"))
+    paths.extend(root.glob(f"*/*/{gradle}"))
+    merged: dict[str, dict[int, tuple[int, int]]] = {}
+    for text in _merge_texts(paths):
+        merged.update(parse_jacoco_lines(text))
+    return merged
+
+
 def _merge_forms(root: Path) -> dict[str, dict[int, tuple[int, int]]]:
     coverage_dir = root / "target" / "coverage"
     found: dict[str, dict[int, tuple[int, int]]] = {}
@@ -592,5 +632,6 @@ def load_bundle(root: Path) -> CoverageBundle:
         go_profile=go_profile or None,
         jacoco=jacoco or None,
         form_html=_merge_forms(root),
+        jacoco_lines=_merge_jacoco_lines(root),
         root=root,
     )
