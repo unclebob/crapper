@@ -208,7 +208,7 @@ def test_conftest_and_a_tests_directory_are_tests(tmp_path):
     assert iter_source_files([source]) == [source.resolve()]
 
 
-def test_missing_coverage_scores_zero_and_sorts_ahead_of_a_covered_function(tmp_path):
+def test_missing_coverage_scores_zero_and_sorts_ahead_of_a_covered_function(tmp_path, capsys):
     low = tmp_path / "src" / "low.ts"
     high = tmp_path / "src" / "high.ts"
     low.parent.mkdir(parents=True)
@@ -221,9 +221,13 @@ def test_missing_coverage_scores_zero_and_sorts_ahead_of_a_covered_function(tmp_
         ("high", 0.0, 6.0),
         ("low", 100.0, 2.0),
     ]
+    assert capsys.readouterr().err == (
+        "1 file(s) have no coverage data, so their functions score 0%:\n  src/high.ts\n"
+    )
     unscored = analyze_files([high], tmp_path, None)
     assert unscored[0].coverage is None
     assert unscored[0].crap is None
+    assert capsys.readouterr().err == ""
 
 
 def test_files_outside_the_project_keep_an_absolute_path(tmp_path):
