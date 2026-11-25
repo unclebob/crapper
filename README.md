@@ -1,6 +1,6 @@
 # crapper
 
-CRAP scores for Clojure, Java, Go, TypeScript, Rust, and Python. One run detects the language of each source file, applies that language's complexity and coverage rules, and writes the snapshot [uml-viewer](https://github.com/unclebob/uml-viewer) already reads.
+CRAP scores for Clojure, Java, Go, TypeScript, Rust, Python, and PHP. One run detects the language of each source file, applies that language's complexity and coverage rules, and writes the snapshot [uml-viewer](https://github.com/unclebob/uml-viewer) already reads.
 
 The formula is the one from [crap4clj](https://github.com/unclebob/crap4clj), [crap4java](https://github.com/unclebob/crap4java), and [crap4go](https://github.com/unclebob/crap4go):
 
@@ -52,6 +52,7 @@ uml-viewer groups entries by `:namespace` and joins each operation on `:name`. `
 | TypeScript | the dotted module path, or `module.Class` | the function or method name |
 | Rust | `crate::module`, or `crate::module::Type` | the function or method name |
 | Python | the dotted module path, or `module.Class` | the function or method name |
+| PHP | the `namespace` with dots for backslashes (`App.Services`), or `App.Services.Class` for methods; the file name when there is no namespace | the function or method name |
 
 Rename or move is a new entry. There is no identity matching across runs.
 
@@ -69,6 +70,8 @@ Rust counts `if`, loops, each `match` arm, `?`, and `&&` / `||`. `mod tests` is 
 
 Python counts `if`, `elif`, `for`, `while`, `except`, each `match` case, a comprehension filter, a conditional expression, and each `and` / `or`. Nested functions stay inside the enclosing function. Coverage is LCOV from `coverage.py`, running pytest when the project uses it and `unittest` otherwise. `coverage` and `pytest` are installed into the project's interpreter when they are missing.
 
+PHP counts `if`, `elseif` and `else if`, `for`, `foreach`, `while`, `do`, `catch`, each `switch` case (not `default`), each `match` arm (not `default`), `?:` in both forms, and `&&`, `||`, `and`, `or`, `??`, and `??=` (`??=` is `$a = $a ?? $b`; TypeScript does not count it). `xor` evaluates both sides and is not counted, nor is the nullsafe `?->`. Methods with a body in classes, traits, and enums, and top-level functions, are entries, constructors included. Closures and arrow functions stay inside the enclosing function. Methods of anonymous classes (`new class { ... }`, as in Laravel migrations) are omitted. `*.blade.php` templates are not read, and `*Test.php` files are tests. Coverage is Clover XML (PHPUnit and Pest cannot write LCOV), read from `target/coverage/php/clover.xml`: `stmt` and `cond` lines are line hits. Clover names files by absolute path, which is matched to the project's relative path by its longest suffix.
+
 ## Coverage commands
 
 By default a run deletes the previous report for each language it is about to measure and regenerates it:
@@ -81,6 +84,7 @@ By default a run deletes the previous report for each language it is about to me
 | TypeScript | `npm run coverage`, or Vitest `--coverage`, or `npx c8 ... npm test` | `coverage/lcov.info` or `target/coverage/typescript/lcov.info` |
 | Rust | `cargo llvm-cov` or `cargo tarpaulin`, per Cargo package | `target/coverage/rust/lcov.info` |
 | Python | `coverage run` with pytest or unittest, then `coverage lcov` | `target/coverage/python/lcov.info` |
+| PHP | `XDEBUG_MODE=coverage php artisan test --coverage-clover ...` when `artisan` exists, else `vendor/bin/pest`, else `vendor/bin/phpunit`, per `composer.json` project | `target/coverage/php/clover.xml` |
 
 A missing tool or a failed test run scores that language at 0% and still writes the snapshot. Pass `--coverage-command` to replace those defaults with one command of your own. `--no-coverage` is the run that leaves coverage and CRAP as N/A.
 

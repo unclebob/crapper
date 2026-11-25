@@ -19,6 +19,7 @@ from crapper.runners import (
     _restore_manifests,
     _rust_kind,
     _vitest_version,
+    php_coverage_command,
     python_coverage_commands,
     python_roots,
     python_sources,
@@ -547,3 +548,50 @@ def test_vitest_install_restores_manifests_when_install_changes_them(tmp_path, m
 def test_python_sources_name_a_top_level_module_without_its_suffix(tmp_path):
     module = tmp_path / "carddav.py"
     assert python_sources(tmp_path, [module, tmp_path / "test_carddav.py"]) == "carddav"
+
+
+def test_php_coverage_prefers_artisan_then_pest_then_phpunit(tmp_path):
+    report = tmp_path / "target" / "coverage" / "php" / "clover.xml"
+    clover = ["--coverage-clover", str(report)]
+    assert php_coverage_command(tmp_path, report) == [
+        "env", "XDEBUG_MODE=coverage", "vendor/bin/phpunit", *clover
+    ]
+    _write(tmp_path, "vendor/bin/pest", "#!/usr/bin/env php\n")
+    assert php_coverage_command(tmp_path, report) == [
+        "env", "XDEBUG_MODE=coverage", "vendor/bin/pest", *clover
+    ]
+    _write(tmp_path, "artisan", "#!/usr/bin/env php\n")
+    assert php_coverage_command(tmp_path, report) == [
+        "env", "XDEBUG_MODE=coverage", "php", "artisan", "test", *clover
+    ]
+
+
+def test_php_coverage_runs_in_the_composer_project_and_drops_a_stale_report(tmp_path, monkeypatch, capsys):
+    calls = []
+
+    def shell(command, cwd):
+        calls.append((command, cwd))
+        return 1
+
+    monkeypatch.setattr("crapper.runners.run_shell", shell)
+    _write(tmp_path, "composer.json", "{}\n")
+    _write(tmp_path, "artisan", "#!/usr/bin/env php\n")
+    source = _write(tmp_path, "app/Services/AutoRefill.php", "<?php\n")
+    report = _write(tmp_path, "target/coverage/php/clover.xml", "<coverage/>")
+    run_coverage(tmp_path, [source], None)
+    assert calls == [
+        (
+            ["env", "XDEBUG_MODE=coverage", "php", "artisan", "test",
+             "--coverage-clover", str(report.resolve())],
+            tmp_path.resolve(),
+        )
+    ]
+    assert not report.exists()
+    assert "PHP coverage exited 1" in capsys.readouterr().err
+
+
+def test_php_without_composer_json_is_skipped(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr("crapper.runners.run_shell", lambda *_args: 0)
+    source = _write(tmp_path, "app/helpers.php", "<?php\n")
+    run_coverage(tmp_path, [source], None)
+    assert "No composer.json; skipping PHP coverage." in capsys.readouterr().err

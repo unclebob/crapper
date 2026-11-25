@@ -20,6 +20,7 @@ EXTENSIONS = {
     ".cjs": "typescript",
     ".rs": "rust",
     ".py": "python",
+    ".php": "php",
 }
 
 SKIP_DIRS = {
@@ -64,12 +65,14 @@ JS_TEST_SUFFIXES = (
     ".test.cjs",
     ".spec.cjs",
 )
+PHP_TEST_SUFFIX = "Test.php"
+PHP_TEMPLATE_SUFFIX = ".blade.php"
 
 
 def language_of(path: str | Path) -> str | None:
     file_path = Path(path)
     name = file_path.name
-    if name.endswith(".d.ts"):
+    if name.endswith((".d.ts", PHP_TEMPLATE_SUFFIX)):
         return None
     return EXTENSIONS.get(file_path.suffix)
 
@@ -82,6 +85,8 @@ def is_test_file(path: str | Path) -> bool:
     if name.endswith(CLOJURE_TEST_SUFFIXES):
         return True
     if name.endswith(JS_TEST_SUFFIXES):
+        return True
+    if name.endswith(PHP_TEST_SUFFIX):
         return True
     if name == "conftest.py":
         return True
