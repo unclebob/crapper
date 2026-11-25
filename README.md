@@ -1,6 +1,6 @@
 # crapper
 
-CRAP scores for Clojure, Java, Go, TypeScript, Rust, and Python. One run detects the language of each source file, applies that language's complexity and coverage rules, and writes the snapshot [uml-viewer](https://github.com/unclebob/uml-viewer) already reads.
+CRAP scores for Clojure, Java, Go, TypeScript, Rust, Python, and Swift. One run detects the language of each source file, applies that language's complexity and coverage rules, and writes the snapshot [uml-viewer](https://github.com/unclebob/uml-viewer) already reads.
 
 The formula is the one from [crap4clj](https://github.com/unclebob/crap4clj), [crap4java](https://github.com/unclebob/crap4java), and [crap4go](https://github.com/unclebob/crap4go):
 
@@ -52,6 +52,7 @@ uml-viewer groups entries by `:namespace` and joins each operation on `:name`. `
 | TypeScript | the dotted module path, or `module.Class` | the function or method name |
 | Rust | `crate::module`, or `crate::module::Type` | the function or method name |
 | Python | the dotted module path, or `module.Class` | the function or method name |
+| Swift | the module, or `Module.Type` | the function, method, initializer, subscript, or property |
 
 Rename or move is a new entry. There is no identity matching across runs.
 
@@ -69,6 +70,12 @@ Rust counts `if`, loops, each `match` arm, `?`, and `&&` / `||`. `mod tests` is 
 
 Python counts `if`, `elif`, `for`, `while`, `except`, each `match` case, a comprehension filter, a conditional expression, and each `and` / `or`. Nested functions stay inside the enclosing function. Coverage is LCOV from `coverage.py`, running pytest when the project uses it and `unittest` otherwise. `coverage` and `pytest` are installed into the project's interpreter when they are missing.
 
+Swift counts `if` (each `else if` is another `if`), `guard`, `for`, `while`, `repeat-while`, each `catch`, `?:`, each `switch` case including `default`, `&&`, `||`, `??`, and optional chaining (`a?.b`, `a?[i]`, `a?()`). These are not decisions: `try` / `try?` / `try!`, `as?` / `as!` / `is`, a `where` clause, `#if`, and the `?` on an optional type (`Int?`) or a failable `init?`. One `if` or `guard` is one decision even when it lists several conditions. `case 1, 2` is one case. Operators inside a string or a comment are not decisions; an interpolated expression is. `#if` does not hide the branches the grammar still parses.
+
+Entries are top-level functions, methods on classes, structs, enums, actors, extensions, and protocols, initializers, deinitializers, subscripts, computed properties, and property observers. `get`, `set`, `willSet`, and `didSet` stay inside the property. A closure stored directly in a `let` or `var` is an entry. Any other closure stays inside the enclosing function, the same way a nested callback stays inside its function in TypeScript. A type declared inside a function keeps its own methods, and those methods are not also charged to the outer function.
+
+The namespace is the module, or `Module.Type` for a member (`Module.Outer.Inner` for a nested type, `Module.Array` for an extension). The module is the SwiftPM target whose path contains the file, otherwise the directory under `Sources/`, otherwise the nearest `.xcodeproj` or `.xcworkspace` name, otherwise the dotted directory path with `src/` removed. uml-viewer groups on that namespace and joins `:name`. mutator uses the same function list, including each entry's byte span, so a nested closure's mutations belong to the enclosing function.
+
 ## Coverage commands
 
 By default a run deletes the previous report for each language it is about to measure and regenerates it:
@@ -81,8 +88,37 @@ By default a run deletes the previous report for each language it is about to me
 | TypeScript | `npm run coverage`, or Vitest `--coverage`, or `npx c8 ... npm test` | `coverage/lcov.info` or `target/coverage/typescript/lcov.info` |
 | Rust | `cargo llvm-cov` or `cargo tarpaulin`, per Cargo package | `target/coverage/rust/lcov.info` |
 | Python | `coverage run` with pytest or unittest, then `coverage lcov` | `target/coverage/python/lcov.info` |
+| Swift | `swift test --enable-code-coverage`, then `llvm-cov export -format=json`; or `xcodebuild test -enableCodeCoverage YES` and `xcrun xccov view --report --json` | `target/coverage/swift/**/*.json` |
 
 A missing tool or a failed test run scores that language at 0% and still writes the snapshot. Pass `--coverage-command` to replace those defaults with one command of your own. `--no-coverage` is the run that leaves coverage and CRAP as N/A.
+
+Swift coverage is region coverage. llvm-cov code regions count; branch, gap, skipped, and expansion regions do not. A report with no function regions uses segments that carry a count. An xccov report joins a function on `lineNumber` and uses `coveredLines` / `executableLines`. A path in the report may be absolute; the file is matched by suffix, as the other languages are.
+
+## Swift coverage on a Mac
+
+iOS coverage is produced by Xcode on a Mac. crapper runs the commands below when `swift` or `xcodebuild` is on the path. To score a report that was produced on another machine, put the JSON under `target/coverage/swift/` and pass `--use-existing-coverage`.
+
+Swift package:
+
+```bash
+swift test --enable-code-coverage
+bin="$(dirname "$(command -v swift)")/llvm-cov"
+profdata="$(find .build -path '*/codecov/default.profdata' -print -quit)"
+binary="$(find .build -type f -name '*PackageTests' -print -quit)"
+mkdir -p target/coverage/swift
+"$bin" export -format=json -instr-profile="$profdata" "$binary" \
+  > target/coverage/swift/llvm-cov.json
+```
+
+Xcode, including an iOS app. The scheme has to be shared (`xcshareddata/xcschemes`). Use `-workspace App.xcworkspace` when the app has a workspace.
+
+```bash
+xcodebuild test -project App.xcodeproj -scheme App \
+  -enableCodeCoverage YES \
+  -resultBundlePath target/coverage/swift/Test.xcresult
+xcrun xccov view --report --json target/coverage/swift/Test.xcresult \
+  > target/coverage/swift/xccov.json
+```
 
 ## Development
 

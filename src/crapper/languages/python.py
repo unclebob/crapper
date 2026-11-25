@@ -8,6 +8,7 @@ enclosing function. A class method's namespace is `module.Class`.
 """
 
 from crapper.languages.treesitter import (
+    ancestor_names,
     child_of_type,
     complexity,
     descendants,
@@ -15,6 +16,8 @@ from crapper.languages.treesitter import (
     node_text,
     parse,
     start_line,
+    strip_root,
+    strip_src,
 )
 from crapper.model import Function
 
@@ -42,23 +45,6 @@ def _skip(node) -> bool:
     return node.type == "class_definition"
 
 
-def _strip_root(relative: str, source_root: str | None) -> str:
-    root = (source_root or "").replace("\\", "/").rstrip("/")
-    if root and root != "." and relative.startswith(root + "/"):
-        return relative[len(root) + 1 :]
-    if relative.startswith("./"):
-        return relative[2:]
-    return relative
-
-
-def _strip_src(relative: str) -> str:
-    if relative.startswith("src/"):
-        return relative[4:]
-    if "/src/" in relative:
-        return relative.split("/src/", 1)[1]
-    return relative
-
-
 def _strip_module_suffix(relative: str) -> str:
     if relative.endswith(".py"):
         relative = relative[: -len(".py")]
@@ -70,7 +56,7 @@ def _strip_module_suffix(relative: str) -> str:
 
 
 def _module_namespace(path: str, source_root: str | None) -> str:
-    relative = _strip_module_suffix(_strip_src(_strip_root(path.replace("\\", "/"), source_root)))
+    relative = _strip_module_suffix(strip_src(strip_root(path.replace("\\", "/"), source_root)))
     if not relative:
         return "__init__"
     return relative.replace("/", ".")
@@ -90,16 +76,7 @@ def _is_nested_function(node) -> bool:
 
 
 def _class_names(data: bytes, node) -> list[str]:
-    names: list[str] = []
-    current = node.parent
-    while current is not None:
-        if current.type == "class_definition":
-            ident = child_of_type(current, "identifier")
-            if ident is not None:
-                names.append(node_text(data, ident))
-        current = current.parent
-    names.reverse()
-    return names
+    return ancestor_names(data, node, "class_definition", "identifier")
 
 
 def functions_in_source(

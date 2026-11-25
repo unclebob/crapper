@@ -1,4 +1,4 @@
-"""Shared tree-sitter helpers for Java, Go, TypeScript, Rust, and Python."""
+"""Shared tree-sitter helpers for Java, Go, TypeScript, Rust, Python, and Swift."""
 
 from functools import lru_cache
 from pathlib import Path
@@ -38,6 +38,43 @@ def child_of_type(node, *types: str):
         if child.type in types:
             return child
     return None
+
+
+def child_text(data: bytes, node, *types: str) -> str | None:
+    ident = child_of_type(node, *types)
+    if ident is None:
+        return None
+    return node_text(data, ident)
+
+
+def strip_root(relative: str, source_root: str | None) -> str:
+    root = (source_root or "").replace("\\", "/").rstrip("/")
+    if root and root != "." and relative.startswith(root + "/"):
+        return relative[len(root) + 1 :]
+    if relative.startswith("./"):
+        return relative[2:]
+    return relative
+
+
+def strip_src(relative: str) -> str:
+    if relative.startswith("src/"):
+        return relative[4:]
+    if "/src/" in relative:
+        return relative.split("/src/", 1)[1]
+    return relative
+
+
+def ancestor_names(data: bytes, node, kind: str, *name_types: str) -> list[str]:
+    names: list[str] = []
+    current = node.parent
+    while current is not None:
+        if current.type == kind:
+            ident = child_of_type(current, *name_types)
+            if ident is not None:
+                names.append(node_text(data, ident))
+        current = current.parent
+    names.reverse()
+    return names
 
 
 def descendants(node):

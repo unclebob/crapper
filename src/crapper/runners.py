@@ -545,6 +545,209 @@ def _cover_python(root: Path, files: list[Path]) -> None:
         _record_python_lcov(package, run_shell(run_cmd, package), data_file, lcov_cmd)
 
 
+def swift_test_command() -> list[str]:
+    return ["swift", "test", "--enable-code-coverage"]
+
+
+def swift_export_command(tool: str, binary: Path, profdata: Path) -> list[str]:
+    return [tool, "export", "-format=json", f"-instr-profile={profdata}", str(binary)]
+
+
+def xcode_export_command(result: Path) -> list[str]:
+    return ["xcrun", "xccov", "view", "--report", "--json", str(result)]
+
+
+def swift_packages(root: Path, files: list[Path]) -> list[Path]:
+    root = root.resolve()
+    return [module.resolve() for module in _modules_with(files, ".swift", "Package.swift", root)]
+
+
+def _first_file(package: Path, pattern: str) -> Path | None:
+    matches = [path for path in package.glob(pattern) if path.is_file()]
+    if not matches:
+        return None
+    return sorted(matches)[0]
+
+
+def swift_profdata(package: Path) -> Path | None:
+    debug = _first_file(package, ".build/**/debug/**/codecov/default.profdata")
+    if debug is not None:
+        return debug
+    return _first_file(package, ".build/**/codecov/default.profdata")
+
+
+def swift_test_binary(package: Path) -> Path | None:
+    return _first_file(package, ".build/**/*PackageTests")
+
+
+def llvm_cov_tool() -> str | None:
+    found = shutil.which("llvm-cov")
+    if found:
+        return found
+    swift = shutil.which("swift")
+    if not swift:
+        return None
+    sibling = Path(swift).resolve().parent / "llvm-cov"
+    if sibling.is_file():
+        return str(sibling)
+    return None
+
+
+def _xcode_bundle(directory: Path) -> Path | None:
+    if not directory.is_dir():
+        return None
+    for pattern in ("*.xcworkspace", "*.xcodeproj"):
+        matches = sorted(path for path in directory.glob(pattern) if path.is_dir())
+        if matches:
+            return matches[0]
+    return None
+
+
+def _nearest_xcode(start: Path, stop: Path) -> Path | None:
+    current = start if start.is_dir() else start.parent
+    stop = stop.resolve()
+    while True:
+        bundle = _xcode_bundle(current)
+        if bundle is not None:
+            return bundle
+        if current == stop or current.parent == current:
+            return None
+        current = current.parent
+
+
+def xcode_projects(root: Path, files: list[Path]) -> list[Path]:
+    found: set[Path] = set()
+    root = root.resolve()
+    for file in files:
+        if Path(file).suffix != ".swift":
+            continue
+        bundle = _nearest_xcode(Path(file), root)
+        if bundle is not None:
+            found.add(bundle.resolve())
+    return sorted(found)
+
+
+def xcode_schemes(project: Path) -> list[str]:
+    schemes = project / "xcshareddata" / "xcschemes"
+    if not schemes.is_dir():
+        return []
+    return sorted(path.stem for path in schemes.glob("*.xcscheme"))
+
+
+def xcode_test_command(project: Path, scheme: str, result: Path) -> list[str]:
+    flag = "-workspace" if project.suffix == ".xcworkspace" else "-project"
+    return [
+        "xcodebuild",
+        "test",
+        flag,
+        str(project),
+        "-scheme",
+        scheme,
+        "-enableCodeCoverage",
+        "YES",
+        "-resultBundlePath",
+        str(result),
+    ]
+
+
+def _redirect(command: list[str], cwd: Path, destination: Path):
+    with destination.open("w", encoding="utf-8") as stdout:
+        return subprocess.run(list(command), cwd=cwd, stdout=stdout)
+
+
+def write_command_output(command: list[str], cwd: Path, destination: Path) -> int:
+    """Run a command and store its stdout. llvm-cov and xccov write JSON there."""
+
+    _warn(f"+ ({cwd}) {_show(command)} > {destination}")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        completed = _redirect(command, cwd, destination)
+    except OSError as exc:
+        _warn(f"Coverage command failed to start: {exc}")
+        return 127
+    return completed.returncode
+
+
+def _swift_report(root: Path, module: Path) -> Path:
+    return _coverage_report(root, module, "swift").with_name("llvm-cov.json")
+
+
+def _within(path: Path, directory: Path) -> bool:
+    try:
+        Path(path).resolve().relative_to(directory.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def _swift_sources_outside(files: list[Path], packages: list[Path]) -> list[Path]:
+    found = []
+    for file in files:
+        if Path(file).suffix != ".swift":
+            continue
+        if any(_within(file, package) for package in packages):
+            continue
+        found.append(Path(file))
+    return found
+
+
+def _export_swift_package(root: Path, package: Path) -> None:
+    profdata = swift_profdata(package)
+    binary = swift_test_binary(package)
+    tool = llvm_cov_tool()
+    if profdata is None or binary is None or tool is None:
+        _warn(f"Swift coverage data is missing in {package}. Swift coverage will score 0%.")
+        return
+    report = _swift_report(root, package)
+    code = write_command_output(swift_export_command(tool, binary, profdata), package, report)
+    if code != 0:
+        _warn(f"llvm-cov export exited {code} in {package}. Swift coverage will score 0%.")
+
+
+def _cover_swift_package(root: Path, package: Path) -> None:
+    if shutil.which("swift") is None:
+        _warn(f"swift is not installed. Swift coverage will score 0% in {package}.")
+        return
+    code = run_shell(swift_test_command(), package)
+    if code != 0:
+        _warn(f"Swift coverage exited {code} in {package}. Swift coverage will score 0%.")
+        return
+    _export_swift_package(root, package)
+
+
+def _cover_xcode(root: Path, project: Path) -> None:
+    if shutil.which("xcodebuild") is None:
+        _warn(f"xcodebuild is not installed. Swift coverage will score 0% for {project.name}.")
+        return
+    schemes = xcode_schemes(project)
+    if not schemes:
+        _warn(f"No shared Xcode scheme in {project}. Swift coverage will score 0%.")
+        return
+    result = _swift_report(root, project).parent / "Test.xcresult"
+    if result.exists():
+        shutil.rmtree(result)
+    code = run_shell(xcode_test_command(project, schemes[0], result), project.parent)
+    if code != 0:
+        _warn(f"Xcode coverage exited {code} in {project}. Swift coverage will score 0%.")
+        return
+    exported = result.parent / "xccov.json"
+    code = write_command_output(xcode_export_command(result), project.parent, exported)
+    if code != 0:
+        _warn(f"xccov exited {code} in {project}. Swift coverage will score 0%.")
+
+
+def _cover_swift(root: Path, files: list[Path]) -> None:
+    packages = swift_packages(root, files)
+    for package in packages:
+        _cover_swift_package(root, package)
+    for project in xcode_projects(root, _swift_sources_outside(files, packages)):
+        _cover_xcode(root, project)
+
+
+def _cover_clojure_files(root: Path, _files: list[Path]) -> None:
+    _cover_clojure(root)
+
+
 def _cover_rust(root: Path, files: list[Path]) -> None:
     modules = rust_modules(root, files)
     if not modules:
@@ -560,6 +763,24 @@ def _cover_rust(root: Path, files: list[Path]) -> None:
         code = run_shell(rust_coverage_command(kind, report), module)
         if code != 0:
             _warn(f"Rust coverage exited {code} in {module}. Rust coverage will score 0%.")
+
+
+_COVERERS = {
+    "clojure": _cover_clojure_files,
+    "java": _cover_java,
+    "go": _cover_go,
+    "typescript": _cover_typescript,
+    "python": _cover_python,
+    "rust": _cover_rust,
+    "swift": _cover_swift,
+}
+
+
+def _cover_present(root: Path, files: list[Path]) -> None:
+    languages = _languages_in(files)
+    for language in ("clojure", "java", "go", "typescript", "python", "rust", "swift"):
+        if language in languages:
+            _COVERERS[language](root, files)
 
 
 def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
@@ -580,17 +801,5 @@ def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
             )
         return code
 
-    languages = _languages_in(files)
-    if "clojure" in languages:
-        _cover_clojure(root)
-    if "java" in languages:
-        _cover_java(root, files)
-    if "go" in languages:
-        _cover_go(root, files)
-    if "typescript" in languages:
-        _cover_typescript(root, files)
-    if "python" in languages:
-        _cover_python(root, files)
-    if "rust" in languages:
-        _cover_rust(root, files)
+    _cover_present(root, files)
     return 0

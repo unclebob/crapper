@@ -1,4 +1,4 @@
-"""Load Cloverage, LCOV, JaCoCo, and Go coverage profiles.
+"""Load Cloverage, LCOV, JaCoCo, Go, and Swift coverage profiles.
 
 Clojure prefers Cloverage's per-line form counts, then LCOV. Java uses JaCoCo
 instruction counters. Go uses statement profiles. LCOV scores a function by
@@ -8,6 +8,7 @@ its BRDA branch records when it has any, and by line hits otherwise.
 
 from __future__ import annotations
 
+import json
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
@@ -370,6 +371,250 @@ def _segments_percent(segments, start: int, end: int) -> float | None:
 
 
 @dataclass
+class SwiftFile:
+    """Regions `(line, count)` or xccov summaries `(line, covered, executable)`."""
+
+    regions: list[tuple[int, int]] = field(default_factory=list)
+    summaries: list[tuple[int, int, int]] = field(default_factory=list)
+
+
+def _is_llvm(data) -> bool:
+    if not isinstance(data, dict):
+        return False
+    if data.get("type") == "llvm.coverage.json.export":
+        return True
+    return isinstance(data.get("data"), list)
+
+
+def _pair(line, count) -> tuple[int, int] | None:
+    try:
+        return int(line), int(count)
+    except (TypeError, ValueError):
+        return None
+
+
+def _code_region(region) -> tuple[int, int] | None:
+    """A code region. Branch, gap, skipped, and expansion regions are not lines."""
+
+    if not isinstance(region, list) or len(region) < 5:
+        return None
+    if len(region) >= 8 and region[7] not in (0, None):
+        return None
+    return _pair(region[0], region[4])
+
+
+def _segment_counts(segment) -> bool:
+    if not segment[3]:
+        return False
+    if len(segment) >= 5 and not segment[4]:
+        return False
+    if len(segment) >= 6 and segment[5]:
+        return False
+    return True
+
+
+def _segment_region(segment) -> tuple[int, int] | None:
+    if not isinstance(segment, list) or len(segment) < 4:
+        return None
+    if not _segment_counts(segment):
+        return None
+    return _pair(segment[0], segment[2])
+
+
+def _regions_of(values, reader) -> list[tuple[int, int]]:
+    found = []
+    if not isinstance(values, list):
+        return found
+    for value in values:
+        parsed = reader(value)
+        if parsed is not None:
+            found.append(parsed)
+    return found
+
+
+def _region_file(region: list) -> int:
+    if len(region) <= 5:
+        return 0
+    try:
+        return int(region[5])
+    except (TypeError, ValueError):
+        return 0
+
+
+def _add_function_region(found: dict[int, list[tuple[int, int]]], region) -> None:
+    parsed = _code_region(region)
+    if parsed is None or not isinstance(region, list):
+        return
+    found.setdefault(_region_file(region), []).append(parsed)
+
+
+def _llvm_function_regions(unit: dict) -> dict[int, list[tuple[int, int]]]:
+    found: dict[int, list[tuple[int, int]]] = {}
+    for function in unit.get("functions") or []:
+        if not isinstance(function, dict):
+            continue
+        for region in function.get("regions") or []:
+            _add_function_region(found, region)
+    return found
+
+
+def _llvm_unit(found: dict[str, SwiftFile], unit: dict) -> None:
+    regions = _llvm_function_regions(unit)
+    for index, file in enumerate(unit.get("files") or []):
+        if not isinstance(file, dict):
+            continue
+        name = file.get("filename")
+        if not isinstance(name, str) or not name:
+            continue
+        chosen = regions.get(index) or _regions_of(file.get("segments"), _segment_region)
+        found.setdefault(name, SwiftFile()).regions.extend(chosen)
+
+
+def _llvm_files(data: dict) -> dict[str, SwiftFile]:
+    found: dict[str, SwiftFile] = {}
+    for unit in data.get("data") or []:
+        if isinstance(unit, dict):
+            _llvm_unit(found, unit)
+    return found
+
+
+def _summary(function) -> tuple[int, int, int] | None:
+    if not isinstance(function, dict):
+        return None
+    if "lineNumber" not in function or "executableLines" not in function:
+        return None
+    try:
+        return (
+            int(function["lineNumber"]),
+            int(function.get("coveredLines") or 0),
+            int(function["executableLines"]),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _summaries(functions) -> list[tuple[int, int, int]]:
+    found = []
+    if not isinstance(functions, list):
+        return found
+    for function in functions:
+        parsed = _summary(function)
+        if parsed is not None:
+            found.append(parsed)
+    return found
+
+
+def _xccov_file(found: dict[str, SwiftFile], file: dict) -> None:
+    path = file.get("path") or file.get("name")
+    if not isinstance(path, str) or not path:
+        return
+    record = found.setdefault(path, SwiftFile())
+    record.summaries.extend(_summaries(file.get("functions")))
+
+
+def _xccov_targets(data) -> list[dict]:
+    if isinstance(data, list):
+        return [item for item in data if isinstance(item, dict)]
+    if not isinstance(data, dict):
+        return []
+    targets = data.get("targets")
+    if isinstance(targets, list):
+        return [item for item in targets if isinstance(item, dict)]
+    if isinstance(data.get("files"), list):
+        return [data]
+    return []
+
+
+def _xccov_files(data) -> dict[str, SwiftFile]:
+    found: dict[str, SwiftFile] = {}
+    for target in _xccov_targets(data):
+        for file in target.get("files") or []:
+            if isinstance(file, dict):
+                _xccov_file(found, file)
+    return found
+
+
+def parse_swift_coverage(text: str) -> dict[str, SwiftFile]:
+    """llvm-cov JSON export, or `xcrun xccov view --report --json`."""
+
+    data = json.loads(text)
+    if _is_llvm(data):
+        return _llvm_files(data)
+    return _xccov_files(data)
+
+
+def _covered_regions(regions, start: int, end: int) -> tuple[int, int]:
+    total = 0
+    covered = 0
+    for line, count in regions:
+        if line < start or line > end:
+            continue
+        total += 1
+        if count > 0:
+            covered += 1
+    return covered, total
+
+
+def _region_percent(regions, start: int, end: int) -> float:
+    covered, total = _covered_regions(regions, start, end)
+    if total == 0:
+        return 0.0
+    return coverage_percent(covered, total)
+
+
+def _summary_percent(summaries, start: int, end: int) -> float:
+    inside = [item for item in summaries if start <= item[0] <= end]
+    if not inside:
+        return 0.0
+    chosen = min(inside, key=lambda item: (abs(item[0] - start), item[0]))
+    return coverage_percent(chosen[1], chosen[2])
+
+
+def _java_percent(bundle, function: Function) -> float | None:
+    names = []
+    if function.jacoco_class:
+        names.append(function.jacoco_class)
+    if function.namespace not in names:
+        names.append(function.namespace)
+    return _jacoco_from_index(bundle.jacoco or {}, names, function.name, function.start_line)
+
+
+def _go_file_percent(bundle, function: Function) -> float | None:
+    segments = bundle._go_segments(function.path)
+    return _segments_percent(segments, function.start_line, function.end_line)
+
+
+def _named_percent(bundle, function: Function) -> float | None:
+    if function.language == "java":
+        return _java_percent(bundle, function)
+    if function.language == "go":
+        return _go_file_percent(bundle, function)
+    return _swift_percent(bundle, function)
+
+
+def _file_percent(bundle, function: Function) -> float | None:
+    html = bundle._html_lines(function.path)
+    if html is not None:
+        return percent_for_range(html, function.start_line, function.end_line)
+    record = bundle._lcov_lines(function.path)
+    if record is None:
+        return None
+    branched = branch_percent(record, function.start_line, function.end_line)
+    if branched is not None:
+        return branched
+    return percent_for_range(record, function.start_line, function.end_line)
+
+
+def _swift_percent(bundle, function: Function) -> float | None:
+    record = _lookup(bundle.swift, function.path, bundle.source_parts)
+    if record is None:
+        return None
+    if record.regions:
+        return _region_percent(record.regions, function.start_line, function.end_line)
+    return _summary_percent(record.summaries, function.start_line, function.end_line)
+
+
+@dataclass
 class JacocoMethod:
     missed: int
     covered: int
@@ -443,6 +688,7 @@ class CoverageBundle:
     go_profile: dict[str, list[tuple[int, int, int, int]]] | None = None
     jacoco: dict[str, list[JacocoMethod]] | None = None
     form_html: dict[str, dict[int, tuple[int, int]]] = field(default_factory=dict)
+    swift: dict[str, SwiftFile] = field(default_factory=dict)
     source_parts: list[tuple[str, ...]] = field(default_factory=list)
     root: Path | None = None
 
@@ -460,28 +706,9 @@ class CoverageBundle:
         self.source_parts = found
 
     def percent_for(self, function: Function) -> float | None:
-        if function.language == "java":
-            names = []
-            if function.jacoco_class:
-                names.append(function.jacoco_class)
-            if function.namespace not in names:
-                names.append(function.namespace)
-            return _jacoco_from_index(
-                self.jacoco or {}, names, function.name, function.start_line
-            )
-        if function.language == "go":
-            segments = self._go_segments(function.path)
-            return _segments_percent(segments, function.start_line, function.end_line)
-        html = self._html_lines(function.path)
-        if html is not None:
-            return percent_for_range(html, function.start_line, function.end_line)
-        record = self._lcov_lines(function.path)
-        if record is None:
-            return None
-        branched = branch_percent(record, function.start_line, function.end_line)
-        if branched is not None:
-            return branched
-        return percent_for_range(record, function.start_line, function.end_line)
+        if function.language in {"java", "go", "swift"}:
+            return _named_percent(self, function)
+        return _file_percent(self, function)
 
     def _go_segments(self, path: str) -> list[tuple[int, int, int, int]] | None:
         """Profile segments for one Go file: by import path, else by the longest path suffix."""
@@ -584,6 +811,27 @@ def _merge_forms(root: Path) -> dict[str, dict[int, tuple[int, int]]]:
     return found
 
 
+def _merge_swift_text(merged: dict[str, SwiftFile], text: str) -> None:
+    try:
+        parsed = parse_swift_coverage(text)
+    except json.JSONDecodeError:
+        return
+    for key, record in parsed.items():
+        current = merged.setdefault(key, SwiftFile())
+        current.regions.extend(record.regions)
+        current.summaries.extend(record.summaries)
+
+
+def _merge_swift(root: Path) -> dict[str, SwiftFile]:
+    coverage = root / "target" / "coverage" / "swift"
+    if not coverage.is_dir():
+        return {}
+    merged: dict[str, SwiftFile] = {}
+    for text in _merge_texts(sorted(coverage.rglob("*.json"))):
+        _merge_swift_text(merged, text)
+    return merged
+
+
 def load_bundle(root: Path) -> CoverageBundle:
     go_profile = _merge_go(root)
     jacoco = _merge_jacoco(root)
@@ -592,5 +840,6 @@ def load_bundle(root: Path) -> CoverageBundle:
         go_profile=go_profile or None,
         jacoco=jacoco or None,
         form_html=_merge_forms(root),
+        swift=_merge_swift(root),
         root=root,
     )

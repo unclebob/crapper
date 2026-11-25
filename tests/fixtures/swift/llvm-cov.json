@@ -1,0 +1,46 @@
+{
+  "type": "llvm.coverage.json.export",
+  "version": "2.0.1",
+  "data": [
+    {
+      "files": [
+        {
+          "filename": "/Users/me/app/Sources/Demo/Box.swift",
+          "segments": [
+            [2, 5, 1, true, true, false],
+            [5, 5, 1, true, true, false],
+            [10, 9, 1, true, true, false]
+          ]
+        },
+        null,
+        {"summary": {}}
+      ],
+      "functions": [
+        "ignored",
+        {
+          "name": "choose(x:)",
+          "count": 1,
+          "filenames": ["/Users/me/app/Sources/Demo/Box.swift"],
+          "regions": [
+            "ignored",
+            [1, 1],
+            [2, 1, 2, 2, "nope", 0, 0, 0],
+            [1, 1, 1, 10, 1, "bad", 0, 0],
+            [6, 1, 6, 2, 0],
+            [3, 9, 3, 18, 0, 0, 0, 4],
+            [2, 1, 2, 2, 0, 0, 0, 2],
+            [20, 1, 20, 2, 0, "file", 0, 0]
+          ]
+        },
+        {
+          "name": "Box.open()",
+          "count": 1,
+          "filenames": ["/Users/me/app/Sources/Demo/Box.swift"],
+          "regions": [
+            [10, 9, 10, 18, 1, 0, 0, 0]
+          ]
+        }
+      ]
+    }
+  ]
+}

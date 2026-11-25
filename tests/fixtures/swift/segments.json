@@ -1,0 +1,22 @@
+{
+  "version": "2.0.1",
+  "data": [
+    {
+      "files": [
+        {
+          "filename": "Sources/Demo/Box.swift",
+          "segments": [
+            [2, 5, 1, true],
+            [5, 5, 0, true, true, false],
+            [6, 1, 0, false, false, true],
+            [2, 1, 0, true, false, false],
+            [2, 1, 0, true, true, true],
+            [20, 1, 1, true],
+            [10, 9, 0, true, true, false]
+          ]
+        }
+      ],
+      "functions": []
+    }
+  ]
+}
