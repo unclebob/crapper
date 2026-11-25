@@ -590,6 +590,16 @@ def _cover_php(root: Path, files: list[Path]) -> None:
             _warn(f"PHP coverage exited {code} in {module}. PHP coverage will score 0%.")
 
 
+_COVERERS = {
+    "java": _cover_java,
+    "go": _cover_go,
+    "typescript": _cover_typescript,
+    "python": _cover_python,
+    "rust": _cover_rust,
+    "php": _cover_php,
+}
+
+
 def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
     """Generate coverage reports for the languages present in `files`.
 
@@ -611,16 +621,7 @@ def run_coverage(root: Path, files: list[Path], command: str | None) -> int:
     languages = _languages_in(files)
     if "clojure" in languages:
         _cover_clojure(root)
-    if "java" in languages:
-        _cover_java(root, files)
-    if "go" in languages:
-        _cover_go(root, files)
-    if "typescript" in languages:
-        _cover_typescript(root, files)
-    if "python" in languages:
-        _cover_python(root, files)
-    if "rust" in languages:
-        _cover_rust(root, files)
-    if "php" in languages:
-        _cover_php(root, files)
+    for language, cover in _COVERERS.items():
+        if language in languages:
+            cover(root, files)
     return 0

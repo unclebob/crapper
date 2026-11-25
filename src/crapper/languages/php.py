@@ -91,20 +91,30 @@ def _namespace_of(data: bytes, node) -> str:
     return node_text(data, name).replace("\\", ".")
 
 
-def _entry_namespace(data: bytes, node, namespace: str, path: str) -> str | None:
-    """The namespace of an entry, or None when `node` is not an entry."""
+def _function_namespace(node, namespace: str, path: str) -> str | None:
+    if _is_nested_function(node):
+        return None
+    return namespace or Path(path).name.removesuffix(".php")
 
-    if node.type == "function_definition":
-        if _is_nested_function(node):
-            return None
-        return namespace or Path(path).name.removesuffix(".php")
-    if node.type != "method_declaration" or child_of_type(node, "compound_statement") is None:
+
+def _method_namespace(data: bytes, node, namespace: str) -> str | None:
+    if child_of_type(node, "compound_statement") is None:
         return None
     owner = _owner(node)
     if owner is None or owner.type == "anonymous_class":
         return None
     class_name = node_text(data, child_of_type(owner, "name"))
     return f"{namespace}.{class_name}" if namespace else class_name
+
+
+def _entry_namespace(data: bytes, node, namespace: str, path: str) -> str | None:
+    """The namespace of an entry, or None when `node` is not an entry."""
+
+    if node.type == "function_definition":
+        return _function_namespace(node, namespace, path)
+    if node.type == "method_declaration":
+        return _method_namespace(data, node, namespace)
+    return None
 
 
 def functions_in_source(
