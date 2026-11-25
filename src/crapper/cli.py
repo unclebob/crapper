@@ -13,6 +13,7 @@ from crapper.discover import (
     CLOJURE_TEST_SUFFIXES,
     GO_TEST_SUFFIX,
     JS_TEST_SUFFIXES,
+    PHP_TEST_SUFFIX,
     SKIP_DIRS,
     TEST_DIRS,
     is_test_file,
@@ -32,6 +33,7 @@ _TEST_PATTERNS = ", ".join(
         "test_*.py",
         "*_test.py",
         "conftest.py",
+        f"*{PHP_TEST_SUFFIX}",
     ]
 )
 
@@ -44,7 +46,7 @@ and prints a report sorted worst first.
 
 Languages: Clojure (.clj .cljc .cljs .bb), Java (.java), Go (.go),
 TypeScript and JavaScript (.ts .tsx .mts .cts .js .jsx .mjs .cjs),
-Rust (.rs), Python (.py).
+Rust (.rs), Python (.py), PHP (.php, not .blade.php).
 
 Options:
   -h, --help                    Print this help and exit.
