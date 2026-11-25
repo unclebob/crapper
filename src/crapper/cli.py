@@ -86,6 +86,7 @@ uml-viewer joins .metrics/crap.edn on :namespace and :name.
   TypeScript   dotted module path, or module.Class for methods
   Rust         crate::module, or crate::module::Type for methods
   Python       dotted module path, or module.Class for methods
+  PHP          namespace with dots, or Name.Space.Class for methods
 """
 
 
