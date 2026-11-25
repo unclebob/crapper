@@ -21,7 +21,8 @@ def test_help_names_the_php_namespace_for_uml_viewer(capsys):
     from crapper.cli import run
 
     assert run(["--help"]) == 0
-    assert "PHP          namespace with dots" in capsys.readouterr().out
+    help_text = capsys.readouterr().out
+    assert "PHP          namespace with dots" in help_text
 
 
 from crapper.languages import functions_in_file
@@ -227,3 +228,10 @@ class Plain { public function go() { return 1; } }
 def test_php_is_registered():
     functions = functions_in_file("php", SCORE, "app/Services/AutoRefill.php", "/proj")
     assert [fn.name for fn in functions] == ["score", "choose", "label", "fallback"]
+
+
+def test_help_names_the_php_coverage_tools(capsys):
+    from crapper.cli import run
+
+    assert run(["--help"]) == 0
+    assert "PHP          Clover XML from php artisan test, Pest, or PHPUnit" in capsys.readouterr().out
