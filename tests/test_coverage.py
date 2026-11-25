@@ -5,6 +5,7 @@ from crapper.coverage import (
     parse_form_coverage,
     parse_go_profile,
     parse_jacoco_index,
+    parse_clover,
     parse_lcov,
 )
 from crapper.model import Function
@@ -204,3 +205,58 @@ def test_go_coverage_falls_back_to_the_path_without_a_module_name(tmp_path):
     assert load_bundle(tmp_path).percent_for(scored) == 100.0
     (tmp_path / "go.mod").write_text("go 1.21\n", encoding="utf-8")
     assert load_bundle(tmp_path).percent_for(scored) == 100.0
+
+
+CLOVER = """<?xml version="1.0" encoding="UTF-8"?>
+<coverage generated="1">
+  <project timestamp="1">
+    <file name="/var/www/html/app/Services/Plain.php">
+      <line num="3" type="method" name="go" count="1"/>
+      <line num="5" type="stmt" count="1"/>
+    </file>
+    <package name="App\\Services">
+      <file name="/var/www/html/app/Services/AutoRefill.php">
+        <class name="App\\Services\\AutoRefill"/>
+        <line num="10" type="method" name="score" count="2"/>
+        <line num="12" type="stmt" count="2"/>
+        <line num="13" type="cond" count="0"/>
+        <line num="14" type="stmt" count="0"/>
+        <line num="15" type="stmt" count="3"/>
+      </file>
+    </package>
+  </project>
+</coverage>
+"""
+
+
+def test_clover_reads_statement_and_condition_lines_in_either_shape():
+    found = parse_clover(CLOVER)
+    assert dict(found["/var/www/html/app/Services/Plain.php"]) == {5: (1, 1)}
+    assert dict(found["/var/www/html/app/Services/AutoRefill.php"]) == {
+        12: (1, 1),
+        13: (0, 1),
+        14: (0, 1),
+        15: (1, 1),
+    }
+
+
+def test_an_absolute_clover_path_scores_the_project_relative_source():
+    bundle = CoverageBundle(lcov=parse_clover(CLOVER))
+    bundle.bind_sources(["app/Services/AutoRefill.php", "app/Services/Plain.php"])
+    method = function(
+        name="score",
+        namespace="App.Services.AutoRefill",
+        start_line=10,
+        end_line=15,
+        path="app/Services/AutoRefill.php",
+        language="php",
+    )
+    assert bundle.percent_for(method) == 50.0
+
+
+def test_load_bundle_reads_the_php_clover_report(tmp_path):
+    clover = tmp_path / "target" / "coverage" / "php" / "clover.xml"
+    clover.parent.mkdir(parents=True)
+    clover.write_text(CLOVER, encoding="utf-8")
+    method = function(start_line=5, end_line=5, path="app/Services/Plain.php", language="php")
+    assert load_bundle(tmp_path).percent_for(method) == 100.0

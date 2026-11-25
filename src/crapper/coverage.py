@@ -1,7 +1,8 @@
-"""Load Cloverage, LCOV, JaCoCo, and Go coverage profiles.
+"""Load Cloverage, LCOV, Clover XML, JaCoCo, and Go coverage profiles.
 
 Clojure prefers Cloverage's per-line form counts, then LCOV. Java uses JaCoCo
-instruction counters. Go uses statement profiles. LCOV scores a function by
+instruction counters. Go uses statement profiles. PHP's Clover XML is read
+into the same line hits as LCOV. LCOV scores a function by
 its BRDA branch records when it has any, and by line hits otherwise.
 `percent_for` returns None when the file is absent; analysis turns that into 0%.
 """
@@ -279,6 +280,29 @@ def parse_lcov(text: str) -> dict[str, FileCoverage]:
     return out
 
 
+_CLOVER_LINE_TYPES = {"stmt", "cond"}
+
+
+def _clover_file(node) -> FileCoverage:
+    record = FileCoverage()
+    for line in node.iter("line"):
+        if line.get("type") not in _CLOVER_LINE_TYPES:
+            continue
+        hits = int(line.get("count") or "0")
+        record[int(line.get("num") or "0")] = (1 if hits > 0 else 0, 1)
+    return record
+
+
+def parse_clover(text: str) -> dict[str, FileCoverage]:
+    """Line hits per file from PHPUnit's Clover XML, keyed by its absolute path.
+
+    `stmt` and `cond` lines are hits; `method` lines only mark where a method starts.
+    """
+
+    root = ET.fromstring(text)
+    return {node.get("name", ""): _clover_file(node) for node in root.iter("file")}
+
+
 def branch_percent(record, start: int, end: int) -> float | None:
     """Branch coverage for a function, or None when that span has no branches."""
 
@@ -543,6 +567,13 @@ def _merge_lcov(root: Path) -> dict[str, dict[int, tuple[int, int]]]:
     return merged
 
 
+def _merge_clover(root: Path) -> dict[str, FileCoverage]:
+    merged: dict[str, FileCoverage] = {}
+    for text in _merge_texts(list(root.glob("target/coverage/php/**/clover.xml"))):
+        merged.update(parse_clover(text))
+    return merged
+
+
 def _merge_go(root: Path) -> dict[str, list[tuple[int, int, int, int]]]:
     paths = [
         root / "target" / "coverage" / "coverage.out",
@@ -588,7 +619,7 @@ def load_bundle(root: Path) -> CoverageBundle:
     go_profile = _merge_go(root)
     jacoco = _merge_jacoco(root)
     return CoverageBundle(
-        lcov=_merge_lcov(root),
+        lcov={**_merge_lcov(root), **_merge_clover(root)},
         go_profile=go_profile or None,
         jacoco=jacoco or None,
         form_html=_merge_forms(root),
