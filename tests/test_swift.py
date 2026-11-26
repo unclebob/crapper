@@ -5,7 +5,7 @@ from pathlib import Path
 from crapper.cli import run
 from crapper.discover import is_test_file, iter_source_files
 from crapper.languages.swift import functions_in_source
-from crapper.runners import llvm_cov_tool, run_coverage, swift_export_command
+from crapper.runners import llvm_cov_tool, run_coverage, swift_export_command, swift_test_binary
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "swift"
 _BOX = (_FIXTURES / "Box.swift").read_text(encoding="utf-8")
@@ -688,6 +688,115 @@ def test_a_missing_or_failing_xcrun_leaves_llvm_cov_unset(tmp_path, monkeypatch)
         _which({"xcrun": str(tmp_path / "not-there")}),
     )
     assert llvm_cov_tool() is None
+
+
+def _xctest_binary(package: Path, directory: str, name: str) -> Path:
+    binary = package / directory / f"{name}.xctest" / "Contents" / "MacOS" / name
+    binary.parent.mkdir(parents=True, exist_ok=True)
+    binary.write_text("bin", encoding="utf-8")
+    return binary
+
+
+def _swift_stub(path: Path) -> Path:
+    return _program(
+        path,
+        "#!/bin/sh\n"
+        'if [ "$1" = "build" ] && [ "$2" = "--show-bin-path" ]; then\n'
+        '  printf "%s\\n" "$SHOW_BIN_PATH"\n'
+        '  exit "${SHOW_BIN_STATUS:-0}"\n'
+        "fi\n"
+        "exit 1\n",
+    )
+
+
+def test_the_current_toolchain_test_binary_is_inside_the_xctest_bundle(tmp_path):
+    binary = _xctest_binary(tmp_path, ".build/out/Products/Debug", "DemoTests")
+    dsym = tmp_path / ".build/out/Products/Debug/DemoTests.dSYM/Contents/MacOS/DemoTests"
+    dsym.parent.mkdir(parents=True)
+    dsym.write_text("dwarf", encoding="utf-8")
+    plist = binary.parents[1] / "Info.plist"
+    plist.write_text("plist", encoding="utf-8")
+    assert swift_test_binary(tmp_path) == binary
+
+
+def test_a_linux_tests_xctest_file_is_the_test_binary(tmp_path):
+    binary = tmp_path / ".build" / "debug" / "DemoTests.xctest"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("bin", encoding="utf-8")
+    assert swift_test_binary(tmp_path) == binary
+
+
+def test_the_earliest_test_executable_is_chosen(tmp_path):
+    first = _xctest_binary(tmp_path, ".build/out/Products/Debug", "AAATests")
+    _xctest_binary(tmp_path, ".build/out/Products/Debug", "ZZZTests")
+    assert swift_test_binary(tmp_path) == first
+
+
+def test_a_bare_tests_file_is_not_the_test_binary(tmp_path):
+    bare = tmp_path / ".build" / "debug" / "AAATests"
+    bare.parent.mkdir(parents=True)
+    bare.write_text("bin", encoding="utf-8")
+    packaged = tmp_path / ".build" / "debug" / "DemoPackageTests"
+    packaged.write_text("bin", encoding="utf-8")
+    assert swift_test_binary(tmp_path) == packaged
+
+
+def test_show_bin_path_is_preferred_to_another_build_product(tmp_path, monkeypatch):
+    swift = _swift_stub(tmp_path / "swift")
+    chosen = _xctest_binary(tmp_path, "products", "ZedTests")
+    decoy = tmp_path / ".build" / "debug" / "AAAPackageTests"
+    decoy.parent.mkdir(parents=True)
+    decoy.write_text("bin", encoding="utf-8")
+    monkeypatch.setattr("crapper.runners.shutil.which", _which({"swift": str(swift)}))
+    monkeypatch.setenv("SHOW_BIN_PATH", str(tmp_path / "products"))
+    monkeypatch.setenv("SHOW_BIN_STATUS", "0")
+    assert swift_test_binary(tmp_path) == chosen
+
+
+def test_a_relative_show_bin_path_is_inside_the_package(tmp_path, monkeypatch):
+    swift = _swift_stub(tmp_path / "swift")
+    chosen = _xctest_binary(tmp_path, "products", "ZedTests")
+    decoy = tmp_path / ".build" / "debug" / "AAAPackageTests"
+    decoy.parent.mkdir(parents=True)
+    decoy.write_text("bin", encoding="utf-8")
+    monkeypatch.setattr("crapper.runners.shutil.which", _which({"swift": str(swift)}))
+    monkeypatch.setenv("SHOW_BIN_PATH", "products")
+    monkeypatch.setenv("SHOW_BIN_STATUS", "0")
+    assert swift_test_binary(tmp_path) == chosen
+
+
+def test_show_bin_path_falls_back_when_it_does_not_name_a_product(tmp_path, monkeypatch):
+    swift = _swift_stub(tmp_path / "swift")
+    chosen = tmp_path / ".build" / "debug" / "DemoPackageTests"
+    chosen.parent.mkdir(parents=True)
+    chosen.write_text("bin", encoding="utf-8")
+    _xctest_binary(tmp_path, "elsewhere", "AAATests")
+    monkeypatch.setattr("crapper.runners.shutil.which", _which({"swift": str(swift)}))
+
+    monkeypatch.setenv("SHOW_BIN_PATH", "")
+    monkeypatch.setenv("SHOW_BIN_STATUS", "0")
+    assert swift_test_binary(tmp_path) == chosen
+
+    monkeypatch.setenv("SHOW_BIN_PATH", str(tmp_path / "elsewhere"))
+    monkeypatch.setenv("SHOW_BIN_STATUS", "1")
+    assert swift_test_binary(tmp_path) == chosen
+
+    noted = tmp_path / "not-a-directory"
+    noted.write_text("notes", encoding="utf-8")
+    monkeypatch.setenv("SHOW_BIN_PATH", str(noted))
+    monkeypatch.setenv("SHOW_BIN_STATUS", "0")
+    assert swift_test_binary(tmp_path) == chosen
+
+    empty = tmp_path / "empty-products"
+    empty.mkdir()
+    monkeypatch.setenv("SHOW_BIN_PATH", str(empty))
+    assert swift_test_binary(tmp_path) == chosen
+
+    monkeypatch.setattr(
+        "crapper.runners.shutil.which",
+        _which({"swift": str(tmp_path / "missing-swift")}),
+    )
+    assert swift_test_binary(tmp_path) == chosen
 
 
 def test_command_output_is_the_report_file(tmp_path, monkeypatch):
