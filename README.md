@@ -88,11 +88,13 @@ By default a run deletes the previous report for each language it is about to me
 | TypeScript | `npm run coverage`, or Vitest `--coverage`, or `npx c8 ... npm test` | `coverage/lcov.info` or `target/coverage/typescript/lcov.info` |
 | Rust | `cargo llvm-cov` or `cargo tarpaulin`, per Cargo package | `target/coverage/rust/lcov.info` |
 | Python | `coverage run` with pytest or unittest, then `coverage lcov` | `target/coverage/python/lcov.info` |
-| Swift | `swift test --enable-code-coverage`, then `llvm-cov export -format=json`; or `xcodebuild test -enableCodeCoverage YES` and `xcrun xccov view --report --json` | `target/coverage/swift/**/*.json` |
+| Swift | `swift test --enable-code-coverage`, then `llvm-cov export` (JSON by default); or `xcodebuild test -enableCodeCoverage YES` and `xcrun xccov view --report --json` | `target/coverage/swift/**/*.json` |
 
 A missing tool or a failed test run scores that language at 0% and still writes the snapshot. Pass `--coverage-command` to replace those defaults with one command of your own. `--no-coverage` is the run that leaves coverage and CRAP as N/A.
 
 Swift coverage is region coverage. llvm-cov code regions count; branch, gap, skipped, and expansion regions do not. A report with no function regions uses segments that carry a count. An xccov report joins a function on `lineNumber` and uses `coveredLines` / `executableLines`. A path in the report may be absolute; the file is matched by suffix, as the other languages are.
+
+Each llvm-cov region is `(start_line, end_line, count)` on `SwiftFile.regions`. `SwiftFile.line_covered(line)` is true when the innermost region containing that line has a count greater than zero. A nested region with count zero leaves its lines uncovered, and a line in no region is uncovered. A segment is one line, so its start and end are the same. CRAP still counts each region once, and only when its start line lies in the function. An xccov summary stays `(line, covered, executable)` and is not a region, so `line_covered` does not read it.
 
 ## Swift coverage on a Mac
 
@@ -102,13 +104,16 @@ Swift package:
 
 ```bash
 swift test --enable-code-coverage
-bin="$(dirname "$(command -v swift)")/llvm-cov"
+bin="$(xcrun --find llvm-cov)"
 profdata="$(find .build -path '*/codecov/default.profdata' -print -quit)"
-binary="$(find .build -type f \( -name '*PackageTests' -o -name '*PackageTests.xctest' \) ! -path '*.dSYM/*' -print -quit)"
+base="$(swift build --show-bin-path)"
+binary="$(find "$base" -type f -path '*.xctest/Contents/MacOS/*Tests' ! -path '*.dSYM/*' -print -quit)"
 mkdir -p target/coverage/swift
-"$bin" export -format=json -instr-profile="$profdata" "$binary" \
+"$bin" export -instr-profile="$profdata" "$binary" \
   > target/coverage/swift/llvm-cov.json
 ```
+
+`llvm-cov export` writes JSON without `-format=json`. Apple LLVM 21 rejects that flag. On a current toolchain the test binary is `NameTests` inside `NameTests.xctest/Contents/MacOS`, under the directory `swift build --show-bin-path` prints. Older toolchains call it `PackageTests` (on Linux the `.xctest` file itself is the executable). When `xcrun` is missing, llvm-cov beside `swift` is the next place to look. crapper falls back to searching `.build` when `swift build --show-bin-path` prints nothing.
 
 Xcode, including an iOS app. The scheme has to be shared (`xcshareddata/xcschemes`). Use `-workspace App.xcworkspace` when the app has a workspace.
 
