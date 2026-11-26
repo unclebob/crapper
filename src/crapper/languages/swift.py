@@ -139,11 +139,11 @@ def _function_name(data: bytes, node) -> str | None:
     return None
 
 
-def _binding_name(data: bytes, node) -> str | None:
-    pattern = child_of_type(node, "pattern")
-    if pattern is None:
+def _named_child(data: bytes, node, kind: str) -> str | None:
+    child = child_of_type(node, kind)
+    if child is None:
         return None
-    return child_text(data, pattern, "simple_identifier")
+    return child_text(data, child, "simple_identifier")
 
 
 def _has_function_body(node) -> bool:
@@ -242,7 +242,7 @@ def _record_subscript(data: bytes, node, module: str, path: str) -> Function | N
 def _record_property(data: bytes, node, module: str, path: str) -> Function | None:
     if _is_nested(node) or not _property_is_entry(node):
         return None
-    name = _binding_name(data, node)
+    name = _named_child(data, node, "pattern")
     if name is None:
         return None
     return _make(node, name, _namespace(module, data, node), path)
@@ -328,13 +328,6 @@ def _call_name(data: bytes, node) -> str | None:
     return _suffix_name(data, callee)
 
 
-def _argument_label(data: bytes, argument) -> str | None:
-    marker = child_of_type(argument, "value_argument_label")
-    if marker is None:
-        return None
-    return child_text(data, marker, "simple_identifier")
-
-
 def _labeled_string(data: bytes, call, label: str) -> str | None:
     suffix = child_of_type(call, "call_suffix")
     if suffix is None:
@@ -343,7 +336,7 @@ def _labeled_string(data: bytes, call, label: str) -> str | None:
     if arguments is None:
         return None
     for argument in arguments.children:
-        if argument.type != "value_argument" or _argument_label(data, argument) != label:
+        if argument.type != "value_argument" or _named_child(data, argument, "value_argument_label") != label:
             continue
         for child in argument.children:
             text = _plain_string(data, child)
