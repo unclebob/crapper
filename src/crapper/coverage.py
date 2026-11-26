@@ -369,10 +369,29 @@ def _segments_percent(segments, start: int, end: int) -> float | None:
 
 @dataclass
 class SwiftFile:
-    """Regions `(line, count)` or xccov summaries `(line, covered, executable)`."""
+    """Code regions `(start_line, end_line, count)`, or xccov summaries.
 
-    regions: list[tuple[int, int]] = field(default_factory=list)
+    `line_covered` is the line question. The innermost region containing the
+    line is covered when its count is greater than zero, so a nested region
+    with count zero leaves those lines uncovered. A line in no region is
+    uncovered. Summaries are not regions: they still score CRAP, and
+    `line_covered` does not read them.
+
+    CRAP counts each region once, and only when its start line lies in the
+    function. A segment, used when a file has no function regions, is one
+    line (`start_line == end_line`).
+    """
+
+    regions: list[tuple[int, int, int]] = field(default_factory=list)
     summaries: list[tuple[int, int, int]] = field(default_factory=list)
+
+    def line_covered(self, line: int) -> bool:
+        """True when the innermost region containing `line` has a count above zero."""
+
+        region = _innermost_region(self.regions, line)
+        if region is None:
+            return False
+        return region[2] > 0
 
 
 def _is_llvm(data) -> bool:
@@ -383,21 +402,21 @@ def _is_llvm(data) -> bool:
     return isinstance(data.get("data"), list)
 
 
-def _pair(line, count) -> tuple[int, int] | None:
+def _region_count(start, end, count) -> tuple[int, int, int] | None:
     try:
-        return int(line), int(count)
+        return int(start), int(end), int(count)
     except (TypeError, ValueError):
         return None
 
 
-def _code_region(region) -> tuple[int, int] | None:
+def _code_region(region) -> tuple[int, int, int] | None:
     """A code region. Branch, gap, skipped, and expansion regions are not lines."""
 
     if not isinstance(region, list) or len(region) < 5:
         return None
     if len(region) >= 8 and region[7] not in (0, None):
         return None
-    return _pair(region[0], region[4])
+    return _region_count(region[0], region[2], region[4])
 
 
 def _segment_counts(segment) -> bool:
@@ -410,15 +429,15 @@ def _segment_counts(segment) -> bool:
     return True
 
 
-def _segment_region(segment) -> tuple[int, int] | None:
+def _segment_region(segment) -> tuple[int, int, int] | None:
     if not isinstance(segment, list) or len(segment) < 4:
         return None
     if not _segment_counts(segment):
         return None
-    return _pair(segment[0], segment[2])
+    return _region_count(segment[0], segment[0], segment[2])
 
 
-def _regions_of(values, reader) -> list[tuple[int, int]]:
+def _regions_of(values, reader) -> list[tuple[int, int, int]]:
     found = []
     if not isinstance(values, list):
         return found
@@ -438,15 +457,15 @@ def _region_file(region: list) -> int:
         return 0
 
 
-def _add_function_region(found: dict[int, list[tuple[int, int]]], region) -> None:
+def _add_function_region(found: dict[int, list[tuple[int, int, int]]], region) -> None:
     parsed = _code_region(region)
     if parsed is None or not isinstance(region, list):
         return
     found.setdefault(_region_file(region), []).append(parsed)
 
 
-def _llvm_function_regions(unit: dict) -> dict[int, list[tuple[int, int]]]:
-    found: dict[int, list[tuple[int, int]]] = {}
+def _llvm_function_regions(unit: dict) -> dict[int, list[tuple[int, int, int]]]:
+    found: dict[int, list[tuple[int, int, int]]] = {}
     for function in unit.get("functions") or []:
         if not isinstance(function, dict):
             continue
@@ -540,11 +559,32 @@ def parse_swift_coverage(text: str) -> dict[str, SwiftFile]:
     return _xccov_files(data)
 
 
+def _contains_line(region: tuple[int, int, int], line: int) -> bool:
+    start, end, _count = region
+    return start <= line <= end
+
+
+def _region_rank(region: tuple[int, int, int]) -> tuple[int, int]:
+    """Smaller span first. The same span keeps the region that starts later."""
+
+    start, end, _count = region
+    return (end - start, -start)
+
+
+def _innermost_region(regions, line: int) -> tuple[int, int, int] | None:
+    containing = [region for region in regions if _contains_line(region, line)]
+    if not containing:
+        return None
+    return min(containing, key=_region_rank)
+
+
 def _covered_regions(regions, start: int, end: int) -> tuple[int, int]:
+    """Each region counts once, and only when its start line lies in the function."""
+
     total = 0
     covered = 0
-    for line, count in regions:
-        if line < start or line > end:
+    for region_start, _region_end, count in regions:
+        if region_start < start or region_start > end:
             continue
         total += 1
         if count > 0:

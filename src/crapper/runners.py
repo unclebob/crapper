@@ -555,7 +555,13 @@ def swift_test_command() -> list[str]:
 
 
 def swift_export_command(tool: str, binary: Path, profdata: Path) -> list[str]:
-    return [tool, "export", "-format=json", f"-instr-profile={profdata}", str(binary)]
+    """argv for llvm-cov's default export, which is JSON.
+
+    Apple LLVM 21 rejects `-format=json` (`Cannot find option named 'json'`).
+    Its default export already writes `llvm.coverage.json.export`.
+    """
+
+    return [tool, "export", f"-instr-profile={profdata}", str(binary)]
 
 
 def xcode_export_command(result: Path) -> list[str]:
@@ -581,37 +587,101 @@ def swift_profdata(package: Path) -> Path | None:
     return _first_file(package, ".build/**/codecov/default.profdata")
 
 
+def _part_ends_with(path: Path, suffix: str) -> bool:
+    return any(part.endswith(suffix) for part in path.parts)
+
+
 def _in_dsym(path: Path) -> bool:
-    return any(part.endswith(".dSYM") for part in path.parts)
+    return _part_ends_with(path, ".dSYM")
 
 
-def _swift_binary(path: Path) -> bool:
+def _in_xctest(path: Path) -> bool:
+    return _part_ends_with(path, ".xctest")
+
+
+def _named_test_file(path: Path) -> bool:
+    name = path.name
+    if name.endswith("PackageTests") or name.endswith("Tests.xctest"):
+        return True
+    return name.endswith("Tests") and _in_xctest(path)
+
+
+def _test_executable(path: Path) -> bool:
     if not path.is_file() or _in_dsym(path):
         return False
-    return path.name.endswith("PackageTests") or path.name.endswith("PackageTests.xctest")
+    return _named_test_file(path)
+
+
+def _first_test_binary(base: Path) -> Path | None:
+    if not base.is_dir():
+        return None
+    found = sorted(path for path in base.rglob("*") if _test_executable(path))
+    if not found:
+        return None
+    return found[0]
+
+
+def _tool_stdout(name: str, args: list[str], cwd: Path | None = None) -> str | None:
+    tool = shutil.which(name)
+    if not tool:
+        return None
+    return _command_stdout([tool, *args], cwd)
+
+
+def _shown_directory(package: Path, text: str) -> Path | None:
+    stripped = text.strip()
+    if stripped == "":
+        return None
+    path = Path(stripped)
+    if not path.is_absolute():
+        path = package / path
+    return path
+
+
+def _swift_bin_path(package: Path) -> Path | None:
+    text = _tool_stdout("swift", ["build", "--show-bin-path"], package)
+    if text is None:
+        return None
+    return _shown_directory(package, text)
 
 
 def swift_test_binary(package: Path) -> Path | None:
-    """The test executable. macOS nests it in the .xctest bundle; Linux names the file .xctest.
+    """The test executable.
 
-    A dSYM stores another file with the same name. That is debug info, not the executable.
+    Prefer the directory `swift build --show-bin-path` prints. Otherwise
+    search `.build`. A current toolchain puts `NameTests` inside
+    `NameTests.xctest/Contents/MacOS`. On Linux the `.xctest` file is the
+    executable. Older toolchains call that file `PackageTests`. A dSYM is
+    debug info, not the executable.
     """
 
-    found = [
-        path
-        for pattern in (".build/**/*PackageTests", ".build/**/*PackageTests.xctest")
-        for path in package.glob(pattern)
-        if _swift_binary(path)
-    ]
-    if not found:
+    base = _swift_bin_path(package)
+    if base is not None:
+        found = _first_test_binary(base)
+        if found is not None:
+            return found
+    return _first_test_binary(package / ".build")
+
+
+def _command_stdout(command: list[str], cwd: Path | None = None) -> str | None:
+    """Captured stdout, or None when the command cannot start or exits non-zero."""
+
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
         return None
-    return sorted(set(found))[0]
+    if completed.returncode != 0:
+        return None
+    return completed.stdout
 
 
-def llvm_cov_tool() -> str | None:
-    found = shutil.which("llvm-cov")
-    if found:
-        return found
+def _llvm_cov_beside_swift() -> str | None:
     swift = shutil.which("swift")
     if not swift:
         return None
@@ -619,6 +689,28 @@ def llvm_cov_tool() -> str | None:
     if sibling.is_file():
         return str(sibling)
     return None
+
+
+def _llvm_cov_from_xcrun() -> str | None:
+    text = _tool_stdout("xcrun", ["--find", "llvm-cov"])
+    if text is None:
+        return None
+    path = Path(text.strip())
+    if path.is_file():
+        return str(path)
+    return None
+
+
+def llvm_cov_tool() -> str | None:
+    """llvm-cov on PATH, beside swift, or `xcrun --find llvm-cov` on a Mac."""
+
+    found = shutil.which("llvm-cov")
+    if found:
+        return found
+    sibling = _llvm_cov_beside_swift()
+    if sibling is not None:
+        return sibling
+    return _llvm_cov_from_xcrun()
 
 
 def _xcode_bundle(directory: Path) -> Path | None:

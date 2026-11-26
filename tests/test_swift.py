@@ -1,11 +1,13 @@
 """Swift functions score the way a reader of the source would count branches."""
 
+import json
 from pathlib import Path
 
 from crapper.cli import run
+from crapper.coverage import SwiftFile, parse_swift_coverage
 from crapper.discover import is_test_file, iter_source_files
 from crapper.languages.swift import functions_in_source
-from crapper.runners import run_coverage
+from crapper.runners import llvm_cov_tool, run_coverage, swift_export_command, swift_test_binary
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "swift"
 _BOX = (_FIXTURES / "Box.swift").read_text(encoding="utf-8")
@@ -322,6 +324,113 @@ def test_llvm_cov_regions_join_the_swift_snapshot(tmp_path):
     assert ':name "open", :namespace "Demo.Box", :complexity 1, :coverage 100.0, :crap 1.0' in text
 
 
+def _llvm_regions(filename: str, regions: list) -> str:
+    return json.dumps(
+        {
+            "type": "llvm.coverage.json.export",
+            "data": [
+                {
+                    "files": [{"filename": filename}],
+                    "functions": [{"regions": regions}],
+                }
+            ],
+        }
+    )
+
+
+def test_a_region_records_its_end_line_and_covers_that_span():
+    text = _llvm_regions(
+        "Sources/Demo/Box.swift",
+        [
+            [4, 9, 5, 2, 1, 0, 0, 0],
+            [2, 1, 2, 4, 0, 0, 0, 0],
+            [4, 1, "end", 2, 1, 0, 0, 0],
+        ],
+    )
+    record = parse_swift_coverage(text)["Sources/Demo/Box.swift"]
+    assert record.regions == [(4, 5, 1), (2, 2, 0)]
+    assert record.line_covered(4)
+    assert record.line_covered(5)
+    assert not record.line_covered(2)
+    assert not record.line_covered(3)
+    assert not record.line_covered(6)
+
+
+def test_the_innermost_region_decides_whether_a_line_is_covered():
+    nested = SwiftFile(regions=[(1, 6, 1), (4, 5, 0)])
+    assert nested.line_covered(1)
+    assert nested.line_covered(3)
+    assert not nested.line_covered(4)
+    assert not nested.line_covered(5)
+    assert nested.line_covered(6)
+    assert not nested.line_covered(7)
+
+    later = SwiftFile(regions=[(4, 5, 0), (5, 6, 1)])
+    assert not later.line_covered(4)
+    assert later.line_covered(5)
+    assert later.line_covered(6)
+
+    same = SwiftFile(regions=[(4, 5, 0), (4, 5, 1)])
+    assert not same.line_covered(4)
+    assert not same.line_covered(5)
+
+
+def test_a_segment_region_is_a_single_line():
+    text = json.dumps(
+        {
+            "data": [
+                {
+                    "files": [
+                        {
+                            "filename": "Short.swift",
+                            "segments": ["nope", [1, 2], [2, 5, 1, True]],
+                        }
+                    ],
+                    "functions": [],
+                }
+            ]
+        }
+    )
+    short = parse_swift_coverage(text)["Short.swift"]
+    assert short.regions == [(2, 2, 1)]
+    text = (_FIXTURES / "segments.json").read_text(encoding="utf-8")
+    record = parse_swift_coverage(text)["Sources/Demo/Box.swift"]
+    assert (2, 2, 1) in record.regions
+    assert (5, 5, 0) in record.regions
+    assert record.line_covered(2)
+    assert not record.line_covered(3)
+    assert not record.line_covered(5)
+
+
+def test_an_xccov_summary_does_not_mark_a_line_covered():
+    record = SwiftFile(summaries=[(2, 1, 1)])
+    assert record.line_covered(2) is False
+
+
+def test_a_spanning_region_still_counts_once_toward_crap(tmp_path):
+    source = tmp_path / "Sources" / "Demo" / "Box.swift"
+    source.parent.mkdir(parents=True)
+    source.write_text(_BOX, encoding="utf-8")
+    report = tmp_path / "target" / "coverage" / "swift" / "llvm-cov.json"
+    report.parent.mkdir(parents=True)
+    report.write_text(
+        _llvm_regions(
+            "Sources/Demo/Box.swift",
+            [
+                [2, 1, 2, 4, 0, 0, 0, 0],
+                [4, 1, 5, 2, 1, 0, 0, 0],
+            ],
+        ),
+        encoding="utf-8",
+    )
+    text = _snapshot(tmp_path)
+    assert ':name "choose", :namespace "Demo", :complexity 2, :coverage 50.0, :crap 2.5' in text
+    assert ':name "open", :namespace "Demo.Box", :complexity 1, :coverage 0.0, :crap 2.0' in text
+    record = parse_swift_coverage(report.read_text(encoding="utf-8"))["Sources/Demo/Box.swift"]
+    assert record.line_covered(5)
+    assert not record.line_covered(2)
+
+
 def test_llvm_cov_segments_are_used_when_a_function_has_no_regions(tmp_path):
     _swift_project(tmp_path, "segments.json")
     text = _snapshot(tmp_path)
@@ -334,6 +443,16 @@ def _plant(root: Path, relative: str, source: str = "") -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(source, encoding="utf-8")
     return path
+
+
+def test_swift_export_uses_the_default_json_format():
+    command = swift_export_command("llvm-cov", Path("DemoTests"), Path("default.profdata"))
+    assert command == [
+        "llvm-cov",
+        "export",
+        "-instr-profile=default.profdata",
+        "DemoTests",
+    ]
 
 
 def test_a_swift_package_exports_llvm_cov_json(tmp_path, monkeypatch, capsys):
@@ -369,7 +488,6 @@ def test_a_swift_package_exports_llvm_cov_json(tmp_path, monkeypatch, capsys):
         [
             "/usr/bin/llvm-cov",
             "export",
-            "-format=json",
             f"-instr-profile={profdata}",
             str(binary),
         ]
@@ -574,6 +692,222 @@ def test_llvm_cov_beside_swift_is_used_when_it_is_not_on_the_path(tmp_path, monk
     assert exports == [str(llvm)]
 
 
+def _program(path: Path, body: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body, encoding="utf-8")
+    path.chmod(0o755)
+    return path
+
+
+def _which(found: dict[str, str]):
+    return lambda name: found.get(name)
+
+
+def test_xcrun_finds_llvm_cov_when_it_is_not_beside_swift(tmp_path, monkeypatch):
+    llvm = tmp_path / "XcodeDefault.xctoolchain" / "usr" / "bin" / "llvm-cov"
+    llvm.parent.mkdir(parents=True)
+    llvm.write_text("", encoding="utf-8")
+    xcrun = _program(
+        tmp_path / "bin" / "xcrun",
+        "#!/bin/sh\n"
+        'if [ "$1" = "--find" ] && [ "$2" = "llvm-cov" ]; then\n'
+        f"  printf '%s\\n' '{llvm}'\n"
+        "  exit 0\n"
+        "fi\n"
+        "exit 1\n",
+    )
+    swift = tmp_path / "usr" / "bin" / "swift"
+    swift.parent.mkdir(parents=True)
+    swift.write_text("", encoding="utf-8")
+    _plant(tmp_path, "Package.swift", "")
+    source = _plant(tmp_path, "Sources/Demo/Box.swift", "func open() {}\n")
+    profdata = tmp_path / ".build" / "debug" / "codecov" / "default.profdata"
+    _plant_profdata(tmp_path)
+    binary = tmp_path / ".build" / "debug" / "DemoPackageTests"
+    binary.write_text("bin", encoding="utf-8")
+    exports = []
+
+    def export(command, cwd, destination):
+        exports.append(list(command))
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text("{}", encoding="utf-8")
+        return 0
+
+    monkeypatch.setattr(
+        "crapper.runners.shutil.which",
+        _which({"swift": str(swift), "xcrun": str(xcrun)}),
+    )
+    monkeypatch.setattr("crapper.runners.run_shell", lambda command, cwd: 0)
+    monkeypatch.setattr("crapper.runners.write_command_output", export)
+    assert run_coverage(tmp_path, [source], None) == 0
+    assert exports == [
+        [str(llvm), "export", f"-instr-profile={profdata}", str(binary)]
+    ]
+
+
+def test_llvm_cov_beside_swift_wins_over_xcrun(tmp_path, monkeypatch):
+    swift = tmp_path / "tool" / "swift"
+    sibling = tmp_path / "tool" / "llvm-cov"
+    other = tmp_path / "xcode" / "llvm-cov"
+    swift.parent.mkdir()
+    sibling.write_text("", encoding="utf-8")
+    other.parent.mkdir()
+    other.write_text("", encoding="utf-8")
+    xcrun = _program(
+        tmp_path / "xcrun",
+        f"#!/bin/sh\nprintf '%s\\n' '{other}'\n",
+    )
+    monkeypatch.setattr(
+        "crapper.runners.shutil.which",
+        _which({"swift": str(swift), "xcrun": str(xcrun)}),
+    )
+    assert llvm_cov_tool() == str(sibling.resolve())
+
+
+def test_a_missing_or_failing_xcrun_leaves_llvm_cov_unset(tmp_path, monkeypatch):
+    monkeypatch.setattr("crapper.runners.shutil.which", lambda name: None)
+    assert llvm_cov_tool() is None
+
+    broken = _program(tmp_path / "xcrun", "#!/bin/sh\nexit 1\n")
+    monkeypatch.setattr(
+        "crapper.runners.shutil.which",
+        _which({"xcrun": str(broken)}),
+    )
+    assert llvm_cov_tool() is None
+
+    blank = _program(tmp_path / "blank-xcrun", "#!/bin/sh\nexit 0\n")
+    monkeypatch.setattr(
+        "crapper.runners.shutil.which",
+        _which({"xcrun": str(blank)}),
+    )
+    assert llvm_cov_tool() is None
+
+    missing_file = _program(
+        tmp_path / "missing-file-xcrun",
+        "#!/bin/sh\nprintf '%s\\n' '/no/such/llvm-cov'\n",
+    )
+    monkeypatch.setattr(
+        "crapper.runners.shutil.which",
+        _which({"xcrun": str(missing_file)}),
+    )
+    assert llvm_cov_tool() is None
+
+    monkeypatch.setattr(
+        "crapper.runners.shutil.which",
+        _which({"xcrun": str(tmp_path / "not-there")}),
+    )
+    assert llvm_cov_tool() is None
+
+
+def _xctest_binary(package: Path, directory: str, name: str) -> Path:
+    binary = package / directory / f"{name}.xctest" / "Contents" / "MacOS" / name
+    binary.parent.mkdir(parents=True, exist_ok=True)
+    binary.write_text("bin", encoding="utf-8")
+    return binary
+
+
+def _swift_stub(path: Path) -> Path:
+    return _program(
+        path,
+        "#!/bin/sh\n"
+        'if [ "$1" = "build" ] && [ "$2" = "--show-bin-path" ]; then\n'
+        '  printf "%s\\n" "$SHOW_BIN_PATH"\n'
+        '  exit "${SHOW_BIN_STATUS:-0}"\n'
+        "fi\n"
+        "exit 1\n",
+    )
+
+
+def test_the_current_toolchain_test_binary_is_inside_the_xctest_bundle(tmp_path):
+    binary = _xctest_binary(tmp_path, ".build/out/Products/Debug", "DemoTests")
+    dsym = tmp_path / ".build/out/Products/Debug/DemoTests.dSYM/Contents/MacOS/DemoTests"
+    dsym.parent.mkdir(parents=True)
+    dsym.write_text("dwarf", encoding="utf-8")
+    plist = binary.parents[1] / "Info.plist"
+    plist.write_text("plist", encoding="utf-8")
+    assert swift_test_binary(tmp_path) == binary
+
+
+def test_a_linux_tests_xctest_file_is_the_test_binary(tmp_path):
+    binary = tmp_path / ".build" / "debug" / "DemoTests.xctest"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("bin", encoding="utf-8")
+    assert swift_test_binary(tmp_path) == binary
+
+
+def test_the_earliest_test_executable_is_chosen(tmp_path):
+    first = _xctest_binary(tmp_path, ".build/out/Products/Debug", "AAATests")
+    _xctest_binary(tmp_path, ".build/out/Products/Debug", "ZZZTests")
+    assert swift_test_binary(tmp_path) == first
+
+
+def test_a_bare_tests_file_is_not_the_test_binary(tmp_path):
+    bare = tmp_path / ".build" / "debug" / "AAATests"
+    bare.parent.mkdir(parents=True)
+    bare.write_text("bin", encoding="utf-8")
+    packaged = tmp_path / ".build" / "debug" / "DemoPackageTests"
+    packaged.write_text("bin", encoding="utf-8")
+    assert swift_test_binary(tmp_path) == packaged
+
+
+def test_show_bin_path_is_preferred_to_another_build_product(tmp_path, monkeypatch):
+    swift = _swift_stub(tmp_path / "swift")
+    chosen = _xctest_binary(tmp_path, "products", "ZedTests")
+    decoy = tmp_path / ".build" / "debug" / "AAAPackageTests"
+    decoy.parent.mkdir(parents=True)
+    decoy.write_text("bin", encoding="utf-8")
+    monkeypatch.setattr("crapper.runners.shutil.which", _which({"swift": str(swift)}))
+    monkeypatch.setenv("SHOW_BIN_PATH", str(tmp_path / "products"))
+    monkeypatch.setenv("SHOW_BIN_STATUS", "0")
+    assert swift_test_binary(tmp_path) == chosen
+
+
+def test_a_relative_show_bin_path_is_inside_the_package(tmp_path, monkeypatch):
+    swift = _swift_stub(tmp_path / "swift")
+    chosen = _xctest_binary(tmp_path, "products", "ZedTests")
+    decoy = tmp_path / ".build" / "debug" / "AAAPackageTests"
+    decoy.parent.mkdir(parents=True)
+    decoy.write_text("bin", encoding="utf-8")
+    monkeypatch.setattr("crapper.runners.shutil.which", _which({"swift": str(swift)}))
+    monkeypatch.setenv("SHOW_BIN_PATH", "products")
+    monkeypatch.setenv("SHOW_BIN_STATUS", "0")
+    assert swift_test_binary(tmp_path) == chosen
+
+
+def test_show_bin_path_falls_back_when_it_does_not_name_a_product(tmp_path, monkeypatch):
+    swift = _swift_stub(tmp_path / "swift")
+    chosen = tmp_path / ".build" / "debug" / "DemoPackageTests"
+    chosen.parent.mkdir(parents=True)
+    chosen.write_text("bin", encoding="utf-8")
+    _xctest_binary(tmp_path, "elsewhere", "AAATests")
+    monkeypatch.setattr("crapper.runners.shutil.which", _which({"swift": str(swift)}))
+
+    monkeypatch.setenv("SHOW_BIN_PATH", "")
+    monkeypatch.setenv("SHOW_BIN_STATUS", "0")
+    assert swift_test_binary(tmp_path) == chosen
+
+    monkeypatch.setenv("SHOW_BIN_PATH", str(tmp_path / "elsewhere"))
+    monkeypatch.setenv("SHOW_BIN_STATUS", "1")
+    assert swift_test_binary(tmp_path) == chosen
+
+    noted = tmp_path / "not-a-directory"
+    noted.write_text("notes", encoding="utf-8")
+    monkeypatch.setenv("SHOW_BIN_PATH", str(noted))
+    monkeypatch.setenv("SHOW_BIN_STATUS", "0")
+    assert swift_test_binary(tmp_path) == chosen
+
+    empty = tmp_path / "empty-products"
+    empty.mkdir()
+    monkeypatch.setenv("SHOW_BIN_PATH", str(empty))
+    assert swift_test_binary(tmp_path) == chosen
+
+    monkeypatch.setattr(
+        "crapper.runners.shutil.which",
+        _which({"swift": str(tmp_path / "missing-swift")}),
+    )
+    assert swift_test_binary(tmp_path) == chosen
+
+
 def test_command_output_is_the_report_file(tmp_path, monkeypatch):
     from crapper.runners import write_command_output
 
@@ -683,6 +1017,25 @@ def test_a_failed_xcode_run_forgets_the_previous_report(tmp_path, monkeypatch):
     monkeypatch.setattr("crapper.runners.run_shell", lambda command, cwd: 1)
     assert run_coverage(tmp_path, [source], None) == 0
     assert ':name "choose", :namespace "Demo", :complexity 2, :coverage 0.0, :crap 6.0' in _snapshot(tmp_path)
+
+
+def test_swift_export_needs_the_profile_the_binary_and_llvm_cov(tmp_path, monkeypatch, capsys):
+    _plant(tmp_path, "Package.swift", "")
+    source = _plant(tmp_path, "Sources/Demo/Box.swift", "func open() {}\n")
+    _plant_profdata(tmp_path)
+    exports = []
+    monkeypatch.setattr(
+        "crapper.runners.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name in {"swift", "llvm-cov"} else None,
+    )
+    monkeypatch.setattr("crapper.runners.run_shell", lambda command, cwd: 0)
+    monkeypatch.setattr(
+        "crapper.runners.write_command_output",
+        lambda command, cwd, destination: exports.append(command) or 0,
+    )
+    assert run_coverage(tmp_path, [source], None) == 0
+    assert exports == []
+    assert "Swift coverage data is missing" in capsys.readouterr().err
 
 
 def test_swift_without_a_toolchain_does_not_run_a_command(tmp_path, monkeypatch, capsys):

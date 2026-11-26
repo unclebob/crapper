@@ -54,6 +54,8 @@ def test_suffix_match_rejects_a_longer_suffix():
     assert suffix_match("src/demo/core.clj", "demo/core.clj") is True
     assert suffix_match("core.clj", "src/demo/core.clj") is False
     assert suffix_match("src/demo/core.clj", "") is False
+    assert suffix_match("", "") is False
+    assert suffix_match("src/a.go", "src/a.go") is True
 
 
 def test_coverage_percent_is_zero_when_there_is_nothing_to_count():
@@ -74,13 +76,17 @@ def test_lcov_keeps_a_file_that_has_no_end_record():
 
 
 def test_go_profile_rejects_a_broken_line():
-    with pytest.raises(ValueError, match="invalid coverage segment"):
+    with pytest.raises(ValueError, match="invalid coverage segment on line 2"):
         parse_go_profile("mode: set\nnot a segment\n")
+    with pytest.raises(ValueError, match="invalid coverage segment on line 1"):
+        parse_go_profile("not a segment\n")
 
 
 def test_go_percent_is_zero_when_no_segment_overlaps_the_function():
     profile = parse_go_profile("mode: set\nboard.go:1.1,2.2 1 1\n")
     assert go_percent(profile, "board.go", 10, 12) == 0.0
+    touching = parse_go_profile("mode: set\nboard.go:3.1,4.2 2 2\n")
+    assert go_percent(touching, "board.go", 1, 3) == 100.0
 
 
 def test_go_percent_does_not_accept_the_first_unrelated_file():
@@ -156,6 +162,34 @@ def test_a_shorter_file_does_not_take_a_longer_files_coverage():
     long = function(path="a/b/main.go", start_line=1, end_line=2)
     assert bundle.percent_for(short) is None
     assert bundle.percent_for(long) == 100.0
+
+
+def test_an_equal_report_key_blocks_a_longer_file():
+    bundle = CoverageBundle(
+        go_profile=parse_go_profile("mode: set\n/data/board.go:1.1,2.2 1 1\n")
+    )
+    bundle.bind_sources(["/proj/data/board.go", "/data/board.go"])
+    covered = function(path="/proj/data/board.go", start_line=1, end_line=2)
+    assert bundle.percent_for(covered) is None
+
+
+def test_the_smaller_added_prefix_is_not_the_shorter_extra_prefix():
+    profile = parse_go_profile(
+        "mode: set\n"
+        "X/proj/src/demo/file.go:1.1,2.2 1 1\n"
+        "Y/Z/proj/demo/file.go:1.1,2.2 1 0\n"
+    )
+    assert go_percent(profile, "/proj/src/demo/file.go", 1, 2) == 100.0
+
+
+def test_a_candidate_path_is_not_blank():
+    from crapper.coverage import _candidates, _key_has_suffix
+
+    assert "" not in _candidates("")
+    assert _key_has_suffix(["src", "a.go"], ["src", "a.go"]) is True
+    bundle = CoverageBundle()
+    bundle.bind_sources(["a.go", "a.go"])
+    assert bundle.source_parts.count(("a.go",)) == 1
 
 
 def test_a_short_report_key_matches_one_longer_source():
