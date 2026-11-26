@@ -614,10 +614,25 @@ def swift_test_binary(package: Path) -> Path | None:
     return sorted(set(found))[0]
 
 
-def llvm_cov_tool() -> str | None:
-    found = shutil.which("llvm-cov")
-    if found:
-        return found
+def _command_stdout(command: list[str], cwd: Path | None = None) -> str | None:
+    """Captured stdout, or None when the command cannot start or exits non-zero."""
+
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return None
+    if completed.returncode != 0:
+        return None
+    return completed.stdout
+
+
+def _llvm_cov_beside_swift() -> str | None:
     swift = shutil.which("swift")
     if not swift:
         return None
@@ -625,6 +640,31 @@ def llvm_cov_tool() -> str | None:
     if sibling.is_file():
         return str(sibling)
     return None
+
+
+def _llvm_cov_from_xcrun() -> str | None:
+    xcrun = shutil.which("xcrun")
+    if xcrun is None:
+        return None
+    text = _command_stdout([xcrun, "--find", "llvm-cov"])
+    if text is None:
+        return None
+    path = Path(text.strip())
+    if path.is_file():
+        return str(path)
+    return None
+
+
+def llvm_cov_tool() -> str | None:
+    """llvm-cov on PATH, beside swift, or `xcrun --find llvm-cov` on a Mac."""
+
+    found = shutil.which("llvm-cov")
+    if found:
+        return found
+    sibling = _llvm_cov_beside_swift()
+    if sibling is not None:
+        return sibling
+    return _llvm_cov_from_xcrun()
 
 
 def _xcode_bundle(directory: Path) -> Path | None:

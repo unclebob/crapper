@@ -5,7 +5,7 @@ from pathlib import Path
 from crapper.cli import run
 from crapper.discover import is_test_file, iter_source_files
 from crapper.languages.swift import functions_in_source
-from crapper.runners import run_coverage, swift_export_command
+from crapper.runners import llvm_cov_tool, run_coverage, swift_export_command
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "swift"
 _BOX = (_FIXTURES / "Box.swift").read_text(encoding="utf-8")
@@ -581,6 +581,113 @@ def test_llvm_cov_beside_swift_is_used_when_it_is_not_on_the_path(tmp_path, monk
     monkeypatch.setattr("crapper.runners.write_command_output", export)
     run_coverage(tmp_path, [source], None)
     assert exports == [str(llvm)]
+
+
+def _program(path: Path, body: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body, encoding="utf-8")
+    path.chmod(0o755)
+    return path
+
+
+def _which(found: dict[str, str]):
+    return lambda name: found.get(name)
+
+
+def test_xcrun_finds_llvm_cov_when_it_is_not_beside_swift(tmp_path, monkeypatch):
+    llvm = tmp_path / "XcodeDefault.xctoolchain" / "usr" / "bin" / "llvm-cov"
+    llvm.parent.mkdir(parents=True)
+    llvm.write_text("", encoding="utf-8")
+    xcrun = _program(
+        tmp_path / "bin" / "xcrun",
+        "#!/bin/sh\n"
+        'if [ "$1" = "--find" ] && [ "$2" = "llvm-cov" ]; then\n'
+        f"  printf '%s\\n' '{llvm}'\n"
+        "  exit 0\n"
+        "fi\n"
+        "exit 1\n",
+    )
+    swift = tmp_path / "usr" / "bin" / "swift"
+    swift.parent.mkdir(parents=True)
+    swift.write_text("", encoding="utf-8")
+    _plant(tmp_path, "Package.swift", "")
+    source = _plant(tmp_path, "Sources/Demo/Box.swift", "func open() {}\n")
+    profdata = tmp_path / ".build" / "debug" / "codecov" / "default.profdata"
+    _plant_profdata(tmp_path)
+    binary = tmp_path / ".build" / "debug" / "DemoPackageTests"
+    binary.write_text("bin", encoding="utf-8")
+    exports = []
+
+    def export(command, cwd, destination):
+        exports.append(list(command))
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text("{}", encoding="utf-8")
+        return 0
+
+    monkeypatch.setattr(
+        "crapper.runners.shutil.which",
+        _which({"swift": str(swift), "xcrun": str(xcrun)}),
+    )
+    monkeypatch.setattr("crapper.runners.run_shell", lambda command, cwd: 0)
+    monkeypatch.setattr("crapper.runners.write_command_output", export)
+    assert run_coverage(tmp_path, [source], None) == 0
+    assert exports == [
+        [str(llvm), "export", f"-instr-profile={profdata}", str(binary)]
+    ]
+
+
+def test_llvm_cov_beside_swift_wins_over_xcrun(tmp_path, monkeypatch):
+    swift = tmp_path / "tool" / "swift"
+    sibling = tmp_path / "tool" / "llvm-cov"
+    other = tmp_path / "xcode" / "llvm-cov"
+    swift.parent.mkdir()
+    sibling.write_text("", encoding="utf-8")
+    other.parent.mkdir()
+    other.write_text("", encoding="utf-8")
+    xcrun = _program(
+        tmp_path / "xcrun",
+        f"#!/bin/sh\nprintf '%s\\n' '{other}'\n",
+    )
+    monkeypatch.setattr(
+        "crapper.runners.shutil.which",
+        _which({"swift": str(swift), "xcrun": str(xcrun)}),
+    )
+    assert llvm_cov_tool() == str(sibling.resolve())
+
+
+def test_a_missing_or_failing_xcrun_leaves_llvm_cov_unset(tmp_path, monkeypatch):
+    monkeypatch.setattr("crapper.runners.shutil.which", lambda name: None)
+    assert llvm_cov_tool() is None
+
+    broken = _program(tmp_path / "xcrun", "#!/bin/sh\nexit 1\n")
+    monkeypatch.setattr(
+        "crapper.runners.shutil.which",
+        _which({"xcrun": str(broken)}),
+    )
+    assert llvm_cov_tool() is None
+
+    blank = _program(tmp_path / "blank-xcrun", "#!/bin/sh\nexit 0\n")
+    monkeypatch.setattr(
+        "crapper.runners.shutil.which",
+        _which({"xcrun": str(blank)}),
+    )
+    assert llvm_cov_tool() is None
+
+    missing_file = _program(
+        tmp_path / "missing-file-xcrun",
+        "#!/bin/sh\nprintf '%s\\n' '/no/such/llvm-cov'\n",
+    )
+    monkeypatch.setattr(
+        "crapper.runners.shutil.which",
+        _which({"xcrun": str(missing_file)}),
+    )
+    assert llvm_cov_tool() is None
+
+    monkeypatch.setattr(
+        "crapper.runners.shutil.which",
+        _which({"xcrun": str(tmp_path / "not-there")}),
+    )
+    assert llvm_cov_tool() is None
 
 
 def test_command_output_is_the_report_file(tmp_path, monkeypatch):
