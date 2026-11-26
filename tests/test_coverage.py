@@ -25,6 +25,11 @@ def function(**kwargs):
     return Function(**defaults)
 
 
+def test_a_single_covered_form_is_kept():
+    html = '<span title="1 out of 1 forms covered">   4&nbsp;</span>'
+    assert parse_form_coverage(html) == {4: (1, 1)}
+
+
 def test_cloverage_form_counts_and_lcov_lines():
     html = '<span class="pc" title="1 out of 2 forms covered">   4&nbsp;&nbsp;(if x 1)</span>'
     assert parse_form_coverage(html) == {4: (1, 2)}
@@ -56,6 +61,11 @@ def test_lcov_branch_records_override_line_hits():
         namespace="demo.app",
     )
     assert bundle.percent_for(scored) == 50.0
+
+
+def test_an_untaken_branch_is_not_a_hit():
+    text = "SF:src/demo/app.ts\nDA:3,1\nBRDA:3,0,0,0\nend_of_record\n"
+    assert parse_lcov(text)["src/demo/app.ts"].branches[3] == (0, 1)
 
 
 def test_a_branch_count_that_is_not_a_number_is_ignored():

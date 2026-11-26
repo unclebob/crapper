@@ -449,6 +449,8 @@ def _regions_of(values, reader) -> list[tuple[int, int, int]]:
 
 
 def _region_file(region: list) -> int:
+    """File id. An index into this function's filenames, not the unit file list."""
+
     if len(region) <= 5:
         return 0
     try:
@@ -457,33 +459,51 @@ def _region_file(region: list) -> int:
         return 0
 
 
-def _add_function_region(found: dict[int, list[tuple[int, int, int]]], region) -> None:
+def _filename_at(names, index: int) -> str | None:
+    """The function filename `index` names, when that slot is a real path."""
+
+    if isinstance(names, list) and 0 <= index < len(names):
+        name = names[index]
+        if isinstance(name, str) and name:
+            return name
+    return None
+
+
+def _add_function_region(found: dict[str, list[tuple[int, int, int]]], names, region) -> None:
     parsed = _code_region(region)
     if parsed is None or not isinstance(region, list):
         return
-    found.setdefault(_region_file(region), []).append(parsed)
+    name = _filename_at(names, _region_file(region))
+    if name is not None:
+        found.setdefault(name, []).append(parsed)
 
 
-def _llvm_function_regions(unit: dict) -> dict[int, list[tuple[int, int, int]]]:
-    found: dict[int, list[tuple[int, int, int]]] = {}
+def _llvm_function_regions(unit: dict) -> dict[str, list[tuple[int, int, int]]]:
+    found: dict[str, list[tuple[int, int, int]]] = {}
     for function in unit.get("functions") or []:
         if not isinstance(function, dict):
             continue
+        names = function.get("filenames")
         for region in function.get("regions") or []:
-            _add_function_region(found, region)
+            _add_function_region(found, names, region)
     return found
 
 
 def _llvm_unit(found: dict[str, SwiftFile], unit: dict) -> None:
     regions = _llvm_function_regions(unit)
-    for index, file in enumerate(unit.get("files") or []):
+    seen: set[str] = set()
+    for file in unit.get("files") or []:
         if not isinstance(file, dict):
             continue
         name = file.get("filename")
         if not isinstance(name, str) or not name:
             continue
-        chosen = regions.get(index) or _regions_of(file.get("segments"), _segment_region)
+        seen.add(name)
+        chosen = regions.get(name) or _regions_of(file.get("segments"), _segment_region)
         found.setdefault(name, SwiftFile()).regions.extend(chosen)
+    for name, parsed in regions.items():
+        if name not in seen:
+            found.setdefault(name, SwiftFile()).regions.extend(parsed)
 
 
 def _llvm_files(data: dict) -> dict[str, SwiftFile]:
@@ -603,7 +623,7 @@ def _summary_percent(summaries, start: int, end: int) -> float:
     inside = [item for item in summaries if start <= item[0] <= end]
     if not inside:
         return 0.0
-    chosen = min(inside, key=lambda item: (abs(item[0] - start), item[0]))
+    chosen = min(inside, key=lambda item: item[0])
     return coverage_percent(chosen[1], chosen[2])
 
 
