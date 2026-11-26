@@ -469,6 +469,29 @@ def _filename_at(names, index: int) -> str | None:
     return None
 
 
+def _unit_filenames(unit: dict) -> list:
+    """Unit file names in file-id order. A hole stays None so later ids do not slide."""
+
+    names = []
+    for file in unit.get("files") or []:
+        name = None
+        if isinstance(file, dict):
+            candidate = file.get("filename")
+            if isinstance(candidate, str):
+                name = candidate
+        names.append(name)
+    return names
+
+
+def _region_names(function: dict, unit_names: list) -> list:
+    """Function filenames when the export wrote them, otherwise the unit file list."""
+
+    names = function.get("filenames")
+    if isinstance(names, list) and names:
+        return names
+    return unit_names
+
+
 def _add_function_region(found: dict[str, list[tuple[int, int, int]]], names, region) -> None:
     parsed = _code_region(region)
     if parsed is None or not isinstance(region, list):
@@ -480,10 +503,11 @@ def _add_function_region(found: dict[str, list[tuple[int, int, int]]], names, re
 
 def _llvm_function_regions(unit: dict) -> dict[str, list[tuple[int, int, int]]]:
     found: dict[str, list[tuple[int, int, int]]] = {}
+    unit_names = _unit_filenames(unit)
     for function in unit.get("functions") or []:
         if not isinstance(function, dict):
             continue
-        names = function.get("filenames")
+        names = _region_names(function, unit_names)
         for region in function.get("regions") or []:
             _add_function_region(found, names, region)
     return found
