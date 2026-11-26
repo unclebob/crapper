@@ -21,6 +21,10 @@ def test_language_detection():
     assert language_of("src/app.jsx") == "typescript"
     assert language_of("src/lib.rs") == "rust"
     assert language_of("src/crapper/cli.py") == "python"
+    assert language_of("Sources/Demo/Box.swift") == "swift"
+    assert is_test_file("Tests/DemoTests/BoxTests.swift") is True
+    assert is_test_file("AppTests/Board.swift") is True
+    assert is_test_file("Sources/Demo/Box.swift") is False
     assert language_of("types.d.ts") is None
     assert language_of("notes.md") is None
     assert language_of("app.cts") == "typescript"
@@ -161,6 +165,8 @@ def test_help_and_unknown_option(capsys):
     assert "uml-viewer" in help_text
     assert ".clj-kondo" in help_text
     assert ".test.cts" in help_text
+    assert ".swift" in help_text
+    assert "Module.Type" in help_text
     assert run(["--not-an-option"]) == 1
     assert run(["--root"]) == 1
     assert run(["--threshold", "nope"]) == 1
@@ -266,6 +272,16 @@ def test_changed_files_follow_git_status(tmp_path, monkeypatch, capsys):
     with pytest.raises(GitError, match="git status failed") as silent:
         _changed_files(tmp_path)
     assert silent.value.code == 128
+
+    def status_fails(args, **kwargs):
+        if "rev-parse" in args:
+            return _Completed(0, f"{tmp_path.resolve()}\n")
+        return _Completed(1, "", "")
+
+    monkeypatch.setattr("crapper.cli.subprocess.run", status_fails)
+    with pytest.raises(GitError, match="git status failed") as status:
+        _changed_files(tmp_path)
+    assert status.value.code == 1
 
 
 def test_relative_paths_are_resolved_under_the_project_root(tmp_path):

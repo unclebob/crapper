@@ -69,6 +69,20 @@ export function text() {
     ]
 
 
+def test_a_callback_outside_a_call_stays_inside_its_function():
+    source = """
+export function outer(flag: boolean) {
+  const local = (n: number) => (n > 0 ? 1 : 0);
+  if (flag) return new Handler((req) => (req.ok ? 1 : 0));
+  return 0;
+}
+"""
+    functions = functions_in_source(source, "src/demo/box.ts", "/proj")
+    assert [(fn.namespace, fn.name, fn.complexity) for fn in functions] == [
+        ("demo.box", "outer", 4)
+    ]
+
+
 def test_express_handlers_are_entries_and_leave_the_parent():
     source = """
 export function mount(app) {

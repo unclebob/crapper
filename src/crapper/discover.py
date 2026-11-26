@@ -20,6 +20,7 @@ EXTENSIONS = {
     ".cjs": "typescript",
     ".rs": "rust",
     ".py": "python",
+    ".swift": "swift",
 }
 
 SKIP_DIRS = {
@@ -40,6 +41,9 @@ SKIP_DIRS = {
     "testdata",
     "__pycache__",
     ".clj-kondo",
+    ".build",
+    ".swiftpm",
+    "DerivedData",
 }
 
 TEST_DIRS = {"test", "tests", "spec", "specs", "__tests__"}
@@ -74,6 +78,16 @@ def language_of(path: str | Path) -> str | None:
     return EXTENSIONS.get(file_path.suffix)
 
 
+def _swift_test(file_path: Path) -> bool:
+    """XCTest and Swift Testing keep tests in `Tests/` or a `*Tests` target."""
+
+    if file_path.suffix != ".swift":
+        return False
+    if file_path.name.endswith("Tests.swift"):
+        return True
+    return any(part.endswith("Tests") for part in file_path.parts)
+
+
 def is_test_file(path: str | Path) -> bool:
     file_path = Path(path)
     name = file_path.name
@@ -86,6 +100,8 @@ def is_test_file(path: str | Path) -> bool:
     if name == "conftest.py":
         return True
     if name.endswith("_test.py") or (name.startswith("test_") and name.endswith(".py")):
+        return True
+    if _swift_test(file_path):
         return True
     return any(part in TEST_DIRS for part in file_path.parts)
 

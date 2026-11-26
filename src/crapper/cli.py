@@ -32,6 +32,7 @@ _TEST_PATTERNS = ", ".join(
         "test_*.py",
         "*_test.py",
         "conftest.py",
+        "*Tests.swift",
     ]
 )
 
@@ -44,7 +45,7 @@ and prints a report sorted worst first.
 
 Languages: Clojure (.clj .cljc .cljs .bb), Java (.java), Go (.go),
 TypeScript and JavaScript (.ts .tsx .mts .cts .js .jsx .mjs .cjs),
-Rust (.rs), Python (.py).
+Rust (.rs), Python (.py), Swift (.swift).
 
 Options:
   -h, --help                    Print this help and exit.
@@ -76,6 +77,8 @@ Coverage, when it is produced:
   TypeScript   npm run coverage, Vitest's own LCOV, or c8 around npm test
   Rust         cargo llvm-cov, or cargo tarpaulin, in the nearest Cargo.toml
   Python       coverage.py LCOV, via pytest or unittest, per project
+  Swift        swift test --enable-code-coverage, then llvm-cov JSON;
+               or xcodebuild test and xcrun xccov view --report --json
 
 uml-viewer joins .metrics/crap.edn on :namespace and :name.
   Clojure      the ns, and the defn name
@@ -84,6 +87,7 @@ uml-viewer joins .metrics/crap.edn on :namespace and :name.
   TypeScript   dotted module path, or module.Class for methods
   Rust         crate::module, or crate::module::Type for methods
   Python       dotted module path, or module.Class for methods
+  Swift        the module, or Module.Type for methods and properties
 """
 
 
@@ -108,59 +112,82 @@ def _take(args: list[str], index: int, option: str) -> str:
     return args[index + 1]
 
 
-def parse_args(argv: list[str] | None = None) -> Options:
-    args = list(sys.argv[1:] if argv is None else argv)
-    if any(arg in {"-h", "--help"} for arg in args):
-        return Options(action="help", message=HELP, exit_code=0)
+def _append_source(options: Options, value: str) -> None:
+    options.source_roots.append(value)
+
+
+def _set_root(options: Options, value: str) -> None:
+    options.project_root = Path(value)
+
+
+def _set_coverage_command(options: Options, value: str) -> None:
+    options.coverage_command = value
+
+
+def _set_threshold(options: Options, value: str) -> None:
+    try:
+        options.threshold = float(value)
+    except ValueError as exc:
+        raise ValueError("--threshold requires a number") from exc
+
+
+_VALUED = {
+    "-s": _append_source,
+    "--source-root": _append_source,
+    "--root": _set_root,
+    "--coverage-command": _set_coverage_command,
+    "--threshold": _set_threshold,
+}
+_FLAGS = {
+    "--no-coverage": "no_coverage",
+    "--use-existing-coverage": "use_existing_coverage",
+    "--changed": "changed",
+}
+
+
+def _apply_arg(options: Options, args: list[str], index: int) -> int:
+    arg = args[index]
+    if arg in _VALUED:
+        _VALUED[arg](options, _take(args, index, arg))
+        return index + 2
+    if arg in _FLAGS:
+        setattr(options, _FLAGS[arg], True)
+        return index + 1
+    if arg.startswith("-"):
+        raise ValueError(f"Unknown option: {arg}")
+    options.positionals.append(arg)
+    return index + 1
+
+
+def _parse_options(args: list[str]) -> Options:
     options = Options(action="analyze")
     index = 0
-    try:
-        while index < len(args):
-            arg = args[index]
-            if arg in {"-s", "--source-root"}:
-                options.source_roots.append(_take(args, index, arg))
-                index += 2
-                continue
-            if arg == "--root":
-                options.project_root = Path(_take(args, index, arg))
-                index += 2
-                continue
-            if arg == "--coverage-command":
-                options.coverage_command = _take(args, index, arg)
-                index += 2
-                continue
-            if arg == "--threshold":
-                raw = _take(args, index, arg)
-                try:
-                    options.threshold = float(raw)
-                except ValueError as exc:
-                    raise ValueError("--threshold requires a number") from exc
-                index += 2
-                continue
-            if arg == "--no-coverage":
-                options.no_coverage = True
-                index += 1
-                continue
-            if arg == "--use-existing-coverage":
-                options.use_existing_coverage = True
-                index += 1
-                continue
-            if arg == "--changed":
-                options.changed = True
-                index += 1
-                continue
-            if arg.startswith("-"):
-                raise ValueError(f"Unknown option: {arg}")
-            options.positionals.append(arg)
-            index += 1
-    except ValueError as exc:
-        return Options(action="help", message=f"{exc}\n\n{HELP}", exit_code=1)
+    while index < len(args):
+        index = _apply_arg(options, args, index)
+    return options
+
+
+def _coverage_conflict(options: Options) -> Options | None:
     if options.no_coverage and options.coverage_command:
         return Options(
             action="help",
             message=f"--no-coverage cannot be combined with --coverage-command\n\n{HELP}",
             exit_code=1,
         )
+    return None
+
+
+def parse_args(argv: list[str] | None = None) -> Options:
+    args = list(sys.argv[1:] if argv is None else argv)
+    if any(arg in {"-h", "--help"} for arg in args):
+        return Options(action="help", message=HELP, exit_code=0)
+    try:
+        options = _parse_options(args)
+    except ValueError as exc:
+        return Options(action="help", message=f"{exc}\n\n{HELP}", exit_code=1)
+    conflict = _coverage_conflict(options)
+    if conflict is not None:
+        return conflict
     return options
 
 

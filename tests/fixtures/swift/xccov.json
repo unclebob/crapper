@@ -1,0 +1,41 @@
+{
+  "coveredLines": 2,
+  "executableLines": 3,
+  "lineCoverage": 0.6666666666666666,
+  "targets": [
+    {
+      "buildProductPath": "/tmp/Demo.app",
+      "coveredLines": 2,
+      "executableLines": 3,
+      "lineCoverage": 0.6666666666666666,
+      "name": "Demo.app",
+      "files": [
+        {
+          "coveredLines": 2,
+          "executableLines": 3,
+          "lineCoverage": 0.6666666666666666,
+          "name": "Box.swift",
+          "path": "/Users/me/app/Sources/Demo/Box.swift",
+          "functions": [
+            {
+              "coveredLines": 1,
+              "executableLines": 2,
+              "executionCount": 1,
+              "lineCoverage": 0.5,
+              "lineNumber": 1,
+              "name": "choose(x:)"
+            },
+            {
+              "coveredLines": 1,
+              "executableLines": 1,
+              "executionCount": 1,
+              "lineCoverage": 1.0,
+              "lineNumber": 9,
+              "name": "Box.open()"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -20,6 +20,8 @@ from crapper.languages.treesitter import (
     node_text,
     parse,
     start_line,
+    strip_root,
+    strip_src,
 )
 from crapper.model import Function
 
@@ -85,23 +87,6 @@ def _grammar(path: str) -> str:
     return "typescript"
 
 
-def _strip_root_prefix(relative: str, source_root: str | None) -> str:
-    root = (source_root or "").replace("\\", "/").rstrip("/")
-    if root and root != "." and relative.startswith(root + "/"):
-        return relative[len(root) + 1 :]
-    if relative.startswith("./"):
-        return relative[2:]
-    return relative
-
-
-def _strip_src_dir(relative: str) -> str:
-    if relative.startswith("src/"):
-        return relative[4:]
-    if "/src/" in relative:
-        return relative.split("/src/", 1)[1]
-    return relative
-
-
 def _strip_script_suffix(relative: str) -> str:
     for suffix in (".tsx", ".mts", ".cts", ".jsx", ".mjs", ".cjs", ".ts", ".js"):
         if relative.endswith(suffix):
@@ -111,8 +96,8 @@ def _strip_script_suffix(relative: str) -> str:
 
 def _module_namespace(path: str, source_root: str | None) -> str:
     relative = path.replace("\\", "/")
-    relative = _strip_root_prefix(relative, source_root)
-    relative = _strip_src_dir(relative)
+    relative = strip_root(relative, source_root)
+    relative = strip_src(relative)
     return _strip_script_suffix(relative).replace("/", ".")
 
 

@@ -13,6 +13,7 @@ from crapper.languages.treesitter import (
     absolute_path as _absolute,
     binary_logic,
     child_of_type,
+    child_text,
     complexity,
     descendants,
     end_line,
@@ -66,17 +67,11 @@ def _receiver_type(data: bytes, method) -> str | None:
 
 
 def _method_name(data: bytes, method) -> str | None:
-    ident = child_of_type(method, "field_identifier")
-    if ident is None:
-        return None
-    return node_text(data, ident)
+    return child_text(data, method, "field_identifier")
 
 
 def _function_name(data: bytes, fn) -> str | None:
-    ident = child_of_type(fn, "identifier")
-    if ident is None:
-        return None
-    return node_text(data, ident)
+    return child_text(data, fn, "identifier")
 
 
 def package_namespace(path: str, package_name: str) -> str:
