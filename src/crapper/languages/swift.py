@@ -17,7 +17,9 @@ branches; an interpolated expression is.
 
 A top-level function, a method, an initializer, a deinitializer, a
 subscript, and a computed property or property observer are entries.
-`get`, `set`, `willSet`, and `didSet` stay inside that entry. A closure
+`get`, `set`, `willSet`, and `didSet` stay inside that entry. A
+requirement or accessor with no statements, such as `{ get set }`, is
+not an entry. A closure
 bound directly with `let` or `var` is an entry, at file scope or on a type.
 Any other closure stays inside the enclosing function, the way a nested
 callback stays inside its function in TypeScript. A local type's methods
@@ -154,10 +156,19 @@ def _direct_lambda(node):
     return None
 
 
-def _property_is_entry(node) -> bool:
-    if child_of_type(node, "computed_property", "willset_didset_block") is not None:
+def _has_statements(node) -> bool:
+    if node.type == "statements":
         return True
-    return _direct_lambda(node) is not None
+    return any(_has_statements(child) for child in node.children)
+
+
+def _property_is_entry(node) -> bool:
+    if _direct_lambda(node) is not None:
+        return True
+    accessor = child_of_type(node, "computed_property", "willset_didset_block")
+    if accessor is None:
+        return False
+    return _has_statements(accessor)
 
 
 def _type_identifiers(data: bytes, node) -> list[str]:
@@ -222,7 +233,7 @@ def _record_function(data: bytes, node, module: str, path: str) -> Function | No
 
 
 def _record_subscript(data: bytes, node, module: str, path: str) -> Function | None:
-    if _is_nested(node):
+    if _is_nested(node) or not _has_statements(node):
         return None
     return _make(node, "subscript", _namespace(module, data, node), path)
 

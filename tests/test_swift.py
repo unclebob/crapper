@@ -164,6 +164,28 @@ func outer(flag: Bool) -> Int {
     assert "map" in source.encode()[make.start_byte : make.end_byte].decode()
 
 
+def test_a_requirement_without_a_body_is_not_a_function():
+    source = """
+protocol P {
+    func req()
+    var name: String { get set }
+    subscript(i: Int) -> Int { get set }
+    init()
+}
+struct S {
+    var name: String { get set }
+    subscript(i: Int) -> Int { i > 0 ? i : 0 }
+}
+class C {
+    var label: String { get set }
+}
+"""
+    functions = functions_in_source(source, "Sources/Demo/Box.swift", "/proj")
+    assert [(fn.namespace, fn.name, fn.complexity) for fn in functions] == [
+        ("Demo.S", "subscript", 2)
+    ]
+
+
 def test_swiftui_body_is_the_view_type():
     source = """
 import SwiftUI
