@@ -233,10 +233,7 @@ def parse_form_coverage(html: str) -> dict[int, tuple[int, int]]:
 def _branch_hit(taken: str) -> bool:
     if taken == "-":
         return False
-    try:
-        return int(taken) > 0
-    except ValueError:
-        return False
+    return int(taken) > 0
 
 
 def _add_branch(record: FileCoverage, line: int, taken: str) -> None:
@@ -653,6 +650,10 @@ def _method_line(method) -> int:
         return 0
 
 
+def _counter_value(counter, name: str) -> int:
+    return int(counter.get(name) or "0")
+
+
 def _record_jacoco_method(found: dict[str, list[JacocoMethod]], class_name: str, method) -> None:
     if method.tag != "method":
         return
@@ -662,8 +663,8 @@ def _record_jacoco_method(found: dict[str, list[JacocoMethod]], class_name: str,
     key = f"{class_name}#{method.get('name', '')}"
     found.setdefault(key, []).append(
         JacocoMethod(
-            missed=int(counter.get("missed") or "0"),
-            covered=int(counter.get("covered") or "0"),
+            missed=_counter_value(counter, "missed"),
+            covered=_counter_value(counter, "covered"),
             line=_method_line(method),
         )
     )
@@ -770,14 +771,17 @@ def _merge_lcov(root: Path) -> dict[str, dict[int, tuple[int, int]]]:
     return merged
 
 
-def _merge_go(root: Path) -> dict[str, list[tuple[int, int, int, int]]]:
-    paths = [
-        root / "target" / "coverage" / "coverage.out",
-        root / "target" / "coverage" / "go" / "coverage.out",
-        root / "coverage.out",
-    ]
+def _go_report_paths(root: Path) -> list[Path]:
+    paths = [root / "target" / "coverage" / "coverage.out"]
+    paths.append(root / "target" / "coverage" / "go" / "coverage.out")
+    paths.append(root / "coverage.out")
     paths.extend(root.glob("*/target/coverage/go/coverage.out"))
     paths.extend(root.glob("*/*/target/coverage/go/coverage.out"))
+    return paths
+
+
+def _merge_go(root: Path) -> dict[str, list[tuple[int, int, int, int]]]:
+    paths = _go_report_paths(root)
     merged: dict[str, list[tuple[int, int, int, int]]] = {}
     for text in _merge_texts(paths):
         for key, segments in parse_go_profile(text).items():

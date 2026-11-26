@@ -273,6 +273,16 @@ def test_changed_files_follow_git_status(tmp_path, monkeypatch, capsys):
         _changed_files(tmp_path)
     assert silent.value.code == 128
 
+    def status_fails(args, **kwargs):
+        if "rev-parse" in args:
+            return _Completed(0, f"{tmp_path.resolve()}\n")
+        return _Completed(1, "", "")
+
+    monkeypatch.setattr("crapper.cli.subprocess.run", status_fails)
+    with pytest.raises(GitError, match="git status failed") as status:
+        _changed_files(tmp_path)
+    assert status.value.code == 1
+
 
 def test_relative_paths_are_resolved_under_the_project_root(tmp_path):
     _write(tmp_path, "src/demo/core.clj", "(ns demo.core)\n\n(defn choose [x]\n  (if x 1 0))\n")

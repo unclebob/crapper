@@ -58,6 +58,13 @@ def test_lcov_branch_records_override_line_hits():
     assert bundle.percent_for(scored) == 50.0
 
 
+def test_a_branch_count_that_is_not_a_number_is_ignored():
+    text = "SF:src/demo/app.ts\nDA:3,1\nBRDA:3,0,0,nope\nend_of_record\n"
+    parsed = parse_lcov(text)["src/demo/app.ts"]
+    assert parsed[3] == (1, 1)
+    assert 3 not in parsed.branches
+
+
 def test_a_branchless_span_keeps_line_coverage():
     text = "SF:src/demo/app.ts\nDA:2,1\nDA:3,0\nBRDA:8,0,0,1\nBRDA:8,0,1,0\nend_of_record\n"
     bundle = CoverageBundle(lcov=parse_lcov(text))

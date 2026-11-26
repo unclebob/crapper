@@ -76,6 +76,26 @@ def test_existing_coverage_script_is_left_alone(tmp_path):
     assert command == ["npm", "run", "coverage"]
 
 
+def test_an_npm_coverage_script_does_not_install_a_provider(tmp_path, monkeypatch):
+    _write(
+        tmp_path,
+        "package.json",
+        json.dumps({"scripts": {"coverage": "vitest run --coverage"}}),
+    )
+    source = _write(tmp_path, "src/app.ts", "export function view() { return 1 }\n")
+    commands = []
+    monkeypatch.setattr(
+        "crapper.runners.run_shell",
+        lambda command, cwd: commands.append(list(command)) or 0,
+    )
+    monkeypatch.setattr(
+        "crapper.runners._ensure_vitest_coverage",
+        lambda package: (_ for _ in ()).throw(AssertionError(package)),
+    )
+    assert run_coverage(tmp_path, [source], None) == 0
+    assert commands == [["npm", "run", "coverage"]]
+
+
 def test_node_test_script_still_uses_c8(tmp_path):
     _write(tmp_path, "package.json", json.dumps({"scripts": {"test": "node --test"}}))
     report_dir = tmp_path / "target" / "coverage" / "typescript"
