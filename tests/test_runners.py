@@ -17,8 +17,10 @@ from crapper.runners import (
     _python_kind,
     _record_python_lcov,
     _restore_manifests,
+    _cover_python,
     _rust_kind,
     _vitest_version,
+    write_command_output,
     python_coverage_commands,
     python_roots,
     python_sources,
@@ -567,3 +569,125 @@ def test_vitest_install_restores_manifests_when_install_changes_them(tmp_path, m
 def test_python_sources_name_a_top_level_module_without_its_suffix(tmp_path):
     module = tmp_path / "carddav.py"
     assert python_sources(tmp_path, [module, tmp_path / "test_carddav.py"]) == "carddav"
+
+
+def test_an_empty_language_directory_is_kept(tmp_path):
+    kept = tmp_path / "target" / "coverage" / "go"
+    kept.mkdir(parents=True)
+    _clean_clojure(tmp_path)
+    assert kept.is_dir()
+
+
+def test_command_output_can_be_written_twice_under_nested_parents(tmp_path, monkeypatch):
+    def fake_run(command, cwd, stdout):
+        stdout.write("ok")
+
+        class Completed:
+            returncode = 0
+
+        return Completed()
+
+    monkeypatch.setattr("crapper.runners.subprocess.run", fake_run)
+    destination = tmp_path / "a" / "b" / "out.json"
+    assert write_command_output(["llvm-cov"], tmp_path, destination) == 0
+    assert write_command_output(["llvm-cov"], tmp_path, destination) == 0
+    assert destination.read_text(encoding="utf-8") == "ok"
+
+
+def test_vitest_coverage_is_ready_only_after_a_real_install(tmp_path, monkeypatch):
+    provider = tmp_path / "node_modules" / "@vitest" / "coverage-v8"
+
+    def install(command, cwd):
+        provider.mkdir(parents=True)
+        return 0
+
+    monkeypatch.setattr("crapper.runners.run_shell", install)
+    assert _ensure_vitest_coverage(tmp_path) is True
+
+    other = tmp_path / "other"
+    other.mkdir()
+    monkeypatch.setattr("crapper.runners.run_shell", lambda command, cwd: 0)
+    assert _ensure_vitest_coverage(other) is False
+
+
+def test_rustup_failure_is_reported_and_success_is_quiet(monkeypatch, capsys):
+    monkeypatch.setattr(
+        "crapper.runners.shutil.which",
+        lambda name: "/bin/rustup" if name == "rustup" else None,
+    )
+    monkeypatch.setattr("crapper.runners.run_shell", lambda command, cwd: 0)
+    assert _rust_kind() is None
+    assert "llvm-tools-preview failed" not in capsys.readouterr().err
+
+    monkeypatch.setattr("crapper.runners.run_shell", lambda command, cwd: 1)
+    assert _rust_kind() is None
+    assert "llvm-tools-preview failed" in capsys.readouterr().err
+
+
+def test_a_failed_install_does_not_count_as_llvm_cov(monkeypatch):
+    installed = {"done": False}
+
+    def which(name):
+        if name == "cargo-llvm-cov" and installed["done"]:
+            return "/bin/cargo-llvm-cov"
+        return None
+
+    def shell(command, cwd):
+        installed["done"] = True
+        return 1
+
+    monkeypatch.setattr("crapper.runners.shutil.which", which)
+    monkeypatch.setattr("crapper.runners.run_shell", shell)
+    assert _rust_kind() is None
+
+
+def test_java_and_go_success_are_quiet(tmp_path, monkeypatch, capsys):
+    java = _write(tmp_path, "src/Board.java", "class Board {}\n")
+    _write(tmp_path, "pom.xml", "<project></project>\n")
+    monkeypatch.setattr("crapper.runners.run_shell", lambda command, cwd: 0)
+    run_coverage(tmp_path, [java], None)
+    assert "exited" not in capsys.readouterr().err
+    monkeypatch.setattr("crapper.runners.run_shell", lambda command, cwd: 1)
+    run_coverage(tmp_path, [java], None)
+    assert "Java coverage exited 1" in capsys.readouterr().err
+
+    go_root = tmp_path / "go"
+    go_source = _write(go_root, "board.go", "package demo\nfunc Place() int { return 1 }\n")
+    _write(go_root, "go.mod", "module example.com/demo\n")
+    monkeypatch.setattr("crapper.runners.run_shell", lambda command, cwd: 0)
+    run_coverage(go_root, [go_source], None)
+    assert "Go coverage exited" not in capsys.readouterr().err
+    monkeypatch.setattr("crapper.runners.run_shell", lambda command, cwd: 1)
+    run_coverage(go_root, [go_source], None)
+    assert "Go coverage exited 1" in capsys.readouterr().err
+
+
+def test_python_and_rust_reports_are_created_again(tmp_path, monkeypatch, capsys):
+    python = _write(tmp_path, "src/app.py", "def run():\n    return 1\n")
+    _write(tmp_path, "pyproject.toml", "")
+    monkeypatch.setattr("crapper.runners._ensure_python_module", lambda *args: True)
+    monkeypatch.setattr("crapper.runners.run_shell", lambda *args: 0)
+    monkeypatch.setattr("crapper.runners._record_python_lcov", lambda *args: None)
+    _cover_python(tmp_path, [python])
+    _cover_python(tmp_path, [python])
+    assert (tmp_path / "target" / "coverage" / "python").is_dir()
+
+    rust_root = tmp_path / "rust"
+    rust = _write(rust_root, "src/lib.rs", "pub fn open() {}\n")
+    _write(rust_root, "Cargo.toml", '[package]\nname = "demo"\nversion = "0.1.0"\n')
+    monkeypatch.setattr(
+        "crapper.runners.shutil.which",
+        lambda name: "/bin/cargo-llvm-cov" if name == "cargo-llvm-cov" else None,
+    )
+    run_coverage(rust_root, [rust], None)
+    run_coverage(rust_root, [rust], None)
+    assert (rust_root / "target" / "coverage" / "rust").is_dir()
+    assert "exited" not in capsys.readouterr().err
+    monkeypatch.setattr("crapper.runners.run_shell", lambda *args: 1)
+    run_coverage(rust_root, [rust], None)
+    assert "Rust coverage exited 1" in capsys.readouterr().err
+
+
+def test_a_successful_custom_coverage_command_is_quiet(tmp_path, capsys):
+    assert run_coverage(tmp_path, [], "true") == 0
+    assert "exited" not in capsys.readouterr().err

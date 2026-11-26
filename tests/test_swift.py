@@ -376,6 +376,23 @@ def test_the_innermost_region_decides_whether_a_line_is_covered():
 
 
 def test_a_segment_region_is_a_single_line():
+    text = json.dumps(
+        {
+            "data": [
+                {
+                    "files": [
+                        {
+                            "filename": "Short.swift",
+                            "segments": ["nope", [1, 2], [2, 5, 1, True]],
+                        }
+                    ],
+                    "functions": [],
+                }
+            ]
+        }
+    )
+    short = parse_swift_coverage(text)["Short.swift"]
+    assert short.regions == [(2, 2, 1)]
     text = (_FIXTURES / "segments.json").read_text(encoding="utf-8")
     record = parse_swift_coverage(text)["Sources/Demo/Box.swift"]
     assert (2, 2, 1) in record.regions
@@ -1000,6 +1017,25 @@ def test_a_failed_xcode_run_forgets_the_previous_report(tmp_path, monkeypatch):
     monkeypatch.setattr("crapper.runners.run_shell", lambda command, cwd: 1)
     assert run_coverage(tmp_path, [source], None) == 0
     assert ':name "choose", :namespace "Demo", :complexity 2, :coverage 0.0, :crap 6.0' in _snapshot(tmp_path)
+
+
+def test_swift_export_needs_the_profile_the_binary_and_llvm_cov(tmp_path, monkeypatch, capsys):
+    _plant(tmp_path, "Package.swift", "")
+    source = _plant(tmp_path, "Sources/Demo/Box.swift", "func open() {}\n")
+    _plant_profdata(tmp_path)
+    exports = []
+    monkeypatch.setattr(
+        "crapper.runners.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name in {"swift", "llvm-cov"} else None,
+    )
+    monkeypatch.setattr("crapper.runners.run_shell", lambda command, cwd: 0)
+    monkeypatch.setattr(
+        "crapper.runners.write_command_output",
+        lambda command, cwd, destination: exports.append(command) or 0,
+    )
+    assert run_coverage(tmp_path, [source], None) == 0
+    assert exports == []
+    assert "Swift coverage data is missing" in capsys.readouterr().err
 
 
 def test_swift_without_a_toolchain_does_not_run_a_command(tmp_path, monkeypatch, capsys):

@@ -165,6 +165,8 @@ def test_load_bundle_merges_each_report(tmp_path):
     assert bundle.percent_for(function(start_line=3, end_line=4)) == 50.0
     assert bundle.go_profile is not None
     assert bundle.jacoco is not None
+    assert "src/demo/core.clj" in bundle.form_html
+    assert "index" not in bundle.form_html
 
 
 def _go_module(module_dir, module_line, profile_text):
