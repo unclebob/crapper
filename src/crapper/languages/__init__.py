@@ -7,6 +7,7 @@ from crapper.languages.python import functions_in_source as python_functions
 from crapper.languages.rust import functions_in_source as rust_functions
 from crapper.languages.swift import functions_in_source as swift_functions
 from crapper.languages.typescript import functions_in_source as typescript_functions
+from crapper.languages.vue import functions_in_source as vue_functions
 from crapper.model import Function
 
 _READERS = {
@@ -17,6 +18,7 @@ _READERS = {
     "python": python_functions,
     "rust": rust_functions,
     "swift": swift_functions,
+    "vue": vue_functions,
 }
 
 

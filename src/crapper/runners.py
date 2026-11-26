@@ -208,11 +208,14 @@ def _ensure_vitest_coverage(package: Path) -> bool:
     return ready
 
 
+_JS_LANGUAGES = frozenset({"typescript", "vue"})
+
+
 def typescript_packages(root: Path, files: list[Path]) -> list[Path]:
     packages: set[Path] = set()
     root = root.resolve()
     for file in files:
-        if language_of(file) != "typescript":
+        if language_of(file) not in _JS_LANGUAGES:
             continue
         package = nearest_marker(file, "package.json", root)
         if package is not None:
@@ -253,7 +256,7 @@ def _vitest_includes(package: Path, files: list[Path]) -> list[str]:
     includes: list[str] = []
     package = package.resolve()
     for file in files:
-        if language_of(file) != "typescript" or is_test_file(file):
+        if language_of(file) not in _JS_LANGUAGES or is_test_file(file):
             continue
         try:
             relative = Path(file).resolve().relative_to(package)
@@ -903,6 +906,8 @@ _COVERERS = {
 
 def _cover_present(root: Path, files: list[Path]) -> None:
     languages = _languages_in(files)
+    if "vue" in languages:
+        languages.add("typescript")
     for language in ("clojure", "java", "go", "typescript", "python", "rust", "swift"):
         if language in languages:
             _COVERERS[language](root, files)
