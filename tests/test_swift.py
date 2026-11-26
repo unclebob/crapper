@@ -1,8 +1,10 @@
 """Swift functions score the way a reader of the source would count branches."""
 
+import json
 from pathlib import Path
 
 from crapper.cli import run
+from crapper.coverage import SwiftFile, parse_swift_coverage
 from crapper.discover import is_test_file, iter_source_files
 from crapper.languages.swift import functions_in_source
 from crapper.runners import llvm_cov_tool, run_coverage, swift_export_command, swift_test_binary
@@ -320,6 +322,96 @@ def test_llvm_cov_regions_join_the_swift_snapshot(tmp_path):
     text = _snapshot(tmp_path)
     assert ':name "choose", :namespace "Demo", :complexity 2, :coverage 50.0, :crap 2.5' in text
     assert ':name "open", :namespace "Demo.Box", :complexity 1, :coverage 100.0, :crap 1.0' in text
+
+
+def _llvm_regions(filename: str, regions: list) -> str:
+    return json.dumps(
+        {
+            "type": "llvm.coverage.json.export",
+            "data": [
+                {
+                    "files": [{"filename": filename}],
+                    "functions": [{"regions": regions}],
+                }
+            ],
+        }
+    )
+
+
+def test_a_region_records_its_end_line_and_covers_that_span():
+    text = _llvm_regions(
+        "Sources/Demo/Box.swift",
+        [
+            [4, 9, 5, 2, 1, 0, 0, 0],
+            [2, 1, 2, 4, 0, 0, 0, 0],
+            [4, 1, "end", 2, 1, 0, 0, 0],
+        ],
+    )
+    record = parse_swift_coverage(text)["Sources/Demo/Box.swift"]
+    assert record.regions == [(4, 5, 1), (2, 2, 0)]
+    assert record.line_covered(4)
+    assert record.line_covered(5)
+    assert not record.line_covered(2)
+    assert not record.line_covered(3)
+    assert not record.line_covered(6)
+
+
+def test_the_innermost_region_decides_whether_a_line_is_covered():
+    nested = SwiftFile(regions=[(1, 6, 1), (4, 5, 0)])
+    assert nested.line_covered(1)
+    assert nested.line_covered(3)
+    assert not nested.line_covered(4)
+    assert not nested.line_covered(5)
+    assert nested.line_covered(6)
+    assert not nested.line_covered(7)
+
+    later = SwiftFile(regions=[(4, 5, 0), (5, 6, 1)])
+    assert not later.line_covered(4)
+    assert later.line_covered(5)
+    assert later.line_covered(6)
+
+    same = SwiftFile(regions=[(4, 5, 0), (4, 5, 1)])
+    assert not same.line_covered(4)
+    assert not same.line_covered(5)
+
+
+def test_a_segment_region_is_a_single_line():
+    text = (_FIXTURES / "segments.json").read_text(encoding="utf-8")
+    record = parse_swift_coverage(text)["Sources/Demo/Box.swift"]
+    assert (2, 2, 1) in record.regions
+    assert (5, 5, 0) in record.regions
+    assert record.line_covered(2)
+    assert not record.line_covered(3)
+    assert not record.line_covered(5)
+
+
+def test_an_xccov_summary_does_not_mark_a_line_covered():
+    record = SwiftFile(summaries=[(2, 1, 1)])
+    assert record.line_covered(2) is False
+
+
+def test_a_spanning_region_still_counts_once_toward_crap(tmp_path):
+    source = tmp_path / "Sources" / "Demo" / "Box.swift"
+    source.parent.mkdir(parents=True)
+    source.write_text(_BOX, encoding="utf-8")
+    report = tmp_path / "target" / "coverage" / "swift" / "llvm-cov.json"
+    report.parent.mkdir(parents=True)
+    report.write_text(
+        _llvm_regions(
+            "Sources/Demo/Box.swift",
+            [
+                [2, 1, 2, 4, 0, 0, 0, 0],
+                [4, 1, 5, 2, 1, 0, 0, 0],
+            ],
+        ),
+        encoding="utf-8",
+    )
+    text = _snapshot(tmp_path)
+    assert ':name "choose", :namespace "Demo", :complexity 2, :coverage 50.0, :crap 2.5' in text
+    assert ':name "open", :namespace "Demo.Box", :complexity 1, :coverage 0.0, :crap 2.0' in text
+    record = parse_swift_coverage(report.read_text(encoding="utf-8"))["Sources/Demo/Box.swift"]
+    assert record.line_covered(5)
+    assert not record.line_covered(2)
 
 
 def test_llvm_cov_segments_are_used_when_a_function_has_no_regions(tmp_path):
