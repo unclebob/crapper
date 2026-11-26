@@ -479,6 +479,65 @@ def test_xcode_without_a_shared_scheme_does_not_build(tmp_path, monkeypatch, cap
     assert "No shared Xcode scheme" in capsys.readouterr().err
 
 
+def _plant_profdata(package: Path) -> None:
+    profdata = package / ".build" / "debug" / "codecov" / "default.profdata"
+    profdata.parent.mkdir(parents=True, exist_ok=True)
+    profdata.write_text("prof", encoding="utf-8")
+
+
+def test_llvm_cov_exports_the_test_binary_not_the_dsym(tmp_path, monkeypatch):
+    _plant(tmp_path, "Package.swift", "")
+    source = _plant(tmp_path, "Sources/Demo/Box.swift", "func open() {}\n")
+    _plant_profdata(tmp_path)
+    dsym = tmp_path / ".build" / "debug" / "DemoPackageTests.dSYM" / "Contents" / "Resources" / "DWARF" / "DemoPackageTests"
+    binary = tmp_path / ".build" / "debug" / "DemoPackageTests.xctest" / "Contents" / "MacOS" / "DemoPackageTests"
+    dsym.parent.mkdir(parents=True)
+    binary.parent.mkdir(parents=True)
+    dsym.write_text("dwarf", encoding="utf-8")
+    binary.write_text("bin", encoding="utf-8")
+    exports = []
+
+    def export(command, cwd, destination):
+        exports.append(list(command))
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text("{}", encoding="utf-8")
+        return 0
+
+    monkeypatch.setattr(
+        "crapper.runners.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name in {"swift", "llvm-cov"} else None,
+    )
+    monkeypatch.setattr("crapper.runners.run_shell", lambda command, cwd: 0)
+    monkeypatch.setattr("crapper.runners.write_command_output", export)
+    assert run_coverage(tmp_path, [source], None) == 0
+    assert exports[0][-1] == str(binary)
+
+
+def test_a_linux_xctest_file_is_the_swift_test_binary(tmp_path, monkeypatch):
+    _plant(tmp_path, "Package.swift", "")
+    source = _plant(tmp_path, "Sources/Demo/Box.swift", "func open() {}\n")
+    _plant_profdata(tmp_path)
+    binary = tmp_path / ".build" / "x86_64-unknown-linux-gnu" / "debug" / "DemoPackageTests.xctest"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("bin", encoding="utf-8")
+    exports = []
+
+    def export(command, cwd, destination):
+        exports.append(list(command))
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text("{}", encoding="utf-8")
+        return 0
+
+    monkeypatch.setattr(
+        "crapper.runners.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name in {"swift", "llvm-cov"} else None,
+    )
+    monkeypatch.setattr("crapper.runners.run_shell", lambda command, cwd: 0)
+    monkeypatch.setattr("crapper.runners.write_command_output", export)
+    assert run_coverage(tmp_path, [source], None) == 0
+    assert exports[0][-1] == str(binary)
+
+
 def test_llvm_cov_beside_swift_is_used_when_it_is_not_on_the_path(tmp_path, monkeypatch):
     swift = tmp_path / "tool" / "swift"
     llvm = tmp_path / "tool" / "llvm-cov"

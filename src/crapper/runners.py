@@ -576,8 +576,31 @@ def swift_profdata(package: Path) -> Path | None:
     return _first_file(package, ".build/**/codecov/default.profdata")
 
 
+def _in_dsym(path: Path) -> bool:
+    return any(part.endswith(".dSYM") for part in path.parts)
+
+
+def _swift_binary(path: Path) -> bool:
+    if not path.is_file() or _in_dsym(path):
+        return False
+    return path.name.endswith("PackageTests") or path.name.endswith("PackageTests.xctest")
+
+
 def swift_test_binary(package: Path) -> Path | None:
-    return _first_file(package, ".build/**/*PackageTests")
+    """The test executable. macOS nests it in the .xctest bundle; Linux names the file .xctest.
+
+    A dSYM stores another file with the same name. That is debug info, not the executable.
+    """
+
+    found = [
+        path
+        for pattern in (".build/**/*PackageTests", ".build/**/*PackageTests.xctest")
+        for path in package.glob(pattern)
+        if _swift_binary(path)
+    ]
+    if not found:
+        return None
+    return sorted(set(found))[0]
 
 
 def llvm_cov_tool() -> str | None:

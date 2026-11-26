@@ -104,7 +104,7 @@ Swift package:
 swift test --enable-code-coverage
 bin="$(dirname "$(command -v swift)")/llvm-cov"
 profdata="$(find .build -path '*/codecov/default.profdata' -print -quit)"
-binary="$(find .build -type f -name '*PackageTests' -print -quit)"
+binary="$(find .build -type f \( -name '*PackageTests' -o -name '*PackageTests.xctest' \) ! -path '*.dSYM/*' -print -quit)"
 mkdir -p target/coverage/swift
 "$bin" export -format=json -instr-profile="$profdata" "$binary" \
   > target/coverage/swift/llvm-cov.json
