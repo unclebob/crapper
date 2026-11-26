@@ -38,19 +38,19 @@ def analyze_files(
     bundle: CoverageBundle | None,
 ) -> list[Entry]:
     root = project_root.resolve()
+    resolved = [
+        (resolved_path, _source_path(resolved_path, root))
+        for resolved_path in (file.resolve() for file in files)
+    ]
     if bundle is not None:
-        bundle.bind_sources([_source_path(file.resolve(), root) for file in files])
+        bundle.bind_sources([relative for _path, relative in resolved])
+    root_text = str(root)
     entries: list[Entry] = []
-    for file in files:
-        file = file.resolve()
+    for file, relative in resolved:
         language = language_of(file)
         if language is None:
             continue
         source = file.read_text(encoding="utf-8", errors="replace")
-        try:
-            relative = file.relative_to(root).as_posix()
-        except ValueError:
-            relative = file.as_posix()
-        for function in functions_in_file(language, source, relative, str(root)):
+        for function in functions_in_file(language, source, relative, root_text):
             entries.append(make_entry(function, _coverage(bundle, function)))
     return sort_entries(entries)
