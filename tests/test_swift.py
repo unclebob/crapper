@@ -5,7 +5,7 @@ from pathlib import Path
 from crapper.cli import run
 from crapper.discover import is_test_file, iter_source_files
 from crapper.languages.swift import functions_in_source
-from crapper.runners import run_coverage
+from crapper.runners import run_coverage, swift_export_command
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "swift"
 _BOX = (_FIXTURES / "Box.swift").read_text(encoding="utf-8")
@@ -336,6 +336,16 @@ def _plant(root: Path, relative: str, source: str = "") -> Path:
     return path
 
 
+def test_swift_export_uses_the_default_json_format():
+    command = swift_export_command("llvm-cov", Path("DemoTests"), Path("default.profdata"))
+    assert command == [
+        "llvm-cov",
+        "export",
+        "-instr-profile=default.profdata",
+        "DemoTests",
+    ]
+
+
 def test_a_swift_package_exports_llvm_cov_json(tmp_path, monkeypatch, capsys):
     _plant(tmp_path, "Package.swift", "// swift-tools-version: 5.9\n")
     source = _plant(tmp_path, "Sources/Demo/Box.swift", "func open() {}\n")
@@ -369,7 +379,6 @@ def test_a_swift_package_exports_llvm_cov_json(tmp_path, monkeypatch, capsys):
         [
             "/usr/bin/llvm-cov",
             "export",
-            "-format=json",
             f"-instr-profile={profdata}",
             str(binary),
         ]

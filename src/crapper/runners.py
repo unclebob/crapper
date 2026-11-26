@@ -555,7 +555,13 @@ def swift_test_command() -> list[str]:
 
 
 def swift_export_command(tool: str, binary: Path, profdata: Path) -> list[str]:
-    return [tool, "export", "-format=json", f"-instr-profile={profdata}", str(binary)]
+    """argv for llvm-cov's default export, which is JSON.
+
+    Apple LLVM 21 rejects `-format=json` (`Cannot find option named 'json'`).
+    Its default export already writes `llvm.coverage.json.export`.
+    """
+
+    return [tool, "export", f"-instr-profile={profdata}", str(binary)]
 
 
 def xcode_export_command(result: Path) -> list[str]:
