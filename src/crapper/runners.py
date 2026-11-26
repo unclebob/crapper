@@ -70,6 +70,11 @@ def _clean_dir(path: Path) -> None:
         shutil.rmtree(path)
 
 
+def _remove_file(path: Path) -> None:
+    if path.is_file():
+        path.unlink()
+
+
 _COVERAGE_DIRS = {"typescript", "rust", "go", "python"}
 
 
@@ -718,16 +723,19 @@ def _export_swift_package(root: Path, package: Path) -> None:
     profdata = swift_profdata(package)
     binary = swift_test_binary(package)
     tool = llvm_cov_tool()
+    report = _swift_report(root, package)
     if profdata is None or binary is None or tool is None:
+        _remove_file(report)
         _warn(f"Swift coverage data is missing in {package}. Swift coverage will score 0%.")
         return
-    report = _swift_report(root, package)
     code = write_command_output(swift_export_command(tool, binary, profdata), package, report)
     if code != 0:
+        _remove_file(report)
         _warn(f"llvm-cov export exited {code} in {package}. Swift coverage will score 0%.")
 
 
 def _cover_swift_package(root: Path, package: Path) -> None:
+    _remove_file(_swift_report(root, package))
     if shutil.which("swift") is None:
         _warn(f"swift is not installed. Swift coverage will score 0% in {package}.")
         return
@@ -739,6 +747,8 @@ def _cover_swift_package(root: Path, package: Path) -> None:
 
 
 def _cover_xcode(root: Path, project: Path) -> None:
+    exported = _swift_report(root, project).parent / "xccov.json"
+    _remove_file(exported)
     if shutil.which("xcodebuild") is None:
         _warn(f"xcodebuild is not installed. Swift coverage will score 0% for {project.name}.")
         return
@@ -746,16 +756,16 @@ def _cover_xcode(root: Path, project: Path) -> None:
     if not schemes:
         _warn(f"No shared Xcode scheme in {project}. Swift coverage will score 0%.")
         return
-    result = _swift_report(root, project).parent / "Test.xcresult"
+    result = exported.parent / "Test.xcresult"
     if result.exists():
         shutil.rmtree(result)
     code = run_shell(xcode_test_command(project, schemes[0], result), project.parent)
     if code != 0:
         _warn(f"Xcode coverage exited {code} in {project}. Swift coverage will score 0%.")
         return
-    exported = result.parent / "xccov.json"
     code = write_command_output(xcode_export_command(result), project.parent, exported)
     if code != 0:
+        _remove_file(exported)
         _warn(f"xccov exited {code} in {project}. Swift coverage will score 0%.")
 
 
