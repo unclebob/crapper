@@ -15,6 +15,7 @@ from crapper.discover import (
     JS_TEST_SUFFIXES,
     SKIP_DIRS,
     TEST_DIRS,
+    VUE_TEST_SUFFIXES,
     is_test_file,
     iter_source_files,
     language_of,
@@ -29,6 +30,7 @@ _TEST_PATTERNS = ", ".join(
         f"*{GO_TEST_SUFFIX}",
         *[f"*{suffix}" for suffix in CLOJURE_TEST_SUFFIXES],
         *[f"*{suffix}" for suffix in JS_TEST_SUFFIXES],
+        *[f"*{suffix}" for suffix in VUE_TEST_SUFFIXES],
         "test_*.py",
         "*_test.py",
         "conftest.py",
@@ -45,7 +47,7 @@ and prints a report sorted worst first.
 
 Languages: Clojure (.clj .cljc .cljs .bb), Java (.java), Go (.go),
 TypeScript and JavaScript (.ts .tsx .mts .cts .js .jsx .mjs .cjs),
-Rust (.rs), Python (.py), Swift (.swift).
+Vue (.vue), Rust (.rs), Python (.py), Swift (.swift).
 
 Options:
   -h, --help                    Print this help and exit.
@@ -75,6 +77,7 @@ Coverage, when it is produced:
   Java         Maven JaCoCo instruction coverage, for each pom.xml module
   Go           go test ./... -coverprofile=...
   TypeScript   npm run coverage, Vitest's own LCOV, or c8 around npm test
+  Vue          npm run coverage, Vitest's own LCOV, or c8 around npm test
   Rust         cargo llvm-cov, or cargo tarpaulin, in the nearest Cargo.toml
   Python       coverage.py LCOV, via pytest or unittest, per project
   Swift        swift test --enable-code-coverage, then llvm-cov JSON;
@@ -85,6 +88,7 @@ uml-viewer joins .metrics/crap.edn on :namespace and :name.
   Java         package.Class, and the method name
   Go           import path, or import.path.Receiver for methods
   TypeScript   dotted module path, or module.Class for methods
+  Vue          dotted component path, or module.Class for class methods
   Rust         crate::module, or crate::module::Type for methods
   Python       dotted module path, or module.Class for methods
   Swift        the module, or Module.Type for methods and properties
