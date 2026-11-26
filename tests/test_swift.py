@@ -244,6 +244,17 @@ def test_package_and_xcode_names_are_the_module(tmp_path):
     assert [(fn.namespace, fn.name) for fn in ios] == [("IOS.ContentView", "body")]
 
 
+def test_a_workspace_names_the_module_when_a_project_is_beside_it(tmp_path):
+    (tmp_path / "Proj.xcodeproj").mkdir()
+    (tmp_path / "Work.xcworkspace").mkdir()
+    functions = functions_in_source(
+        "struct ContentView { func body() {} }\n",
+        "App/ContentView.swift",
+        str(tmp_path),
+    )
+    assert [(fn.namespace, fn.name) for fn in functions] == [("Work.ContentView", "body")]
+
+
 def test_a_commented_target_does_not_name_the_module(tmp_path):
     (tmp_path / "Package.swift").write_text(
         "\n".join(

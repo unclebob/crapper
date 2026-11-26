@@ -27,8 +27,9 @@ are their own entries and are not also charged to the enclosing function.
 
 The namespace is the module, or `Module.Type` for a member. The module is
 the SwiftPM target whose path contains the file, otherwise the directory
-under `Sources/`, otherwise the nearest `.xcodeproj` or `.xcworkspace`
-name, otherwise the dotted directory path with `src/` removed. The
+under `Sources/`, otherwise the nearest `.xcworkspace`, or an
+`.xcodeproj` when that directory has no workspace, otherwise the
+dotted directory path with `src/` removed. The
 manifest is parsed, so a comment is not a target and a parenthesis
 inside a string does not end one. Nested types keep each owner
 (`Module.Outer.Inner`). An extension uses the extended type
@@ -404,7 +405,7 @@ def _target_for(package_dir: Path, file: Path) -> str | None:
 
 
 def _project_name(directory: Path) -> str | None:
-    for pattern in ("*.xcodeproj", "*.xcworkspace"):
+    for pattern in ("*.xcworkspace", "*.xcodeproj"):
         matches = sorted(directory.glob(pattern))
         if matches:
             return matches[0].stem
