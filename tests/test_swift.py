@@ -244,6 +244,33 @@ def test_package_and_xcode_names_are_the_module(tmp_path):
     assert [(fn.namespace, fn.name) for fn in ios] == [("IOS.ContentView", "body")]
 
 
+def test_a_commented_target_does_not_name_the_module(tmp_path):
+    (tmp_path / "Package.swift").write_text(
+        "\n".join(
+            [
+                '// .target(name: "Stale", path: "Sources/Demo"),',
+                '/* .target(name: "Blocked", path: "Sources/Demo") */',
+                '.testTarget(name: "DemoTests", path: "lib/demo"),',
+                '.target(name: "Demo", path: "lib/demo"),',
+                '.executableTarget(name: "Tool", path: "lib/tool"),',
+                '.target(name: "Weird", path: "lib/odd", cSettings: [.define("FOO", to: "a)b")]),',
+                '.target(name: "Wide", path: """',
+                "lib/wide",
+                '"""),',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    demo = functions_in_source("func open() {}\n", "lib/demo/Box.swift", str(tmp_path))
+    assert demo[0].namespace == "Demo"
+    tool = functions_in_source("func main() {}\n", "lib/tool/Main.swift", str(tmp_path))
+    assert tool[0].namespace == "Tool"
+    weird = functions_in_source("func open() {}\n", "lib/odd/Box.swift", str(tmp_path))
+    assert weird[0].namespace == "Weird"
+    wide = functions_in_source("func open() {}\n", "lib/wide/Box.swift", str(tmp_path))
+    assert wide[0].namespace == "Wide"
+
+
 def test_swift_tests_and_build_products_are_not_scored(tmp_path):
     source = tmp_path / "Sources" / "Demo" / "Box.swift"
     source.parent.mkdir(parents=True)

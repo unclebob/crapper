@@ -28,14 +28,15 @@ are their own entries and are not also charged to the enclosing function.
 The namespace is the module, or `Module.Type` for a member. The module is
 the SwiftPM target whose path contains the file, otherwise the directory
 under `Sources/`, otherwise the nearest `.xcodeproj` or `.xcworkspace`
-name, otherwise the dotted directory path with `src/` removed. Nested
-types keep each owner (`Module.Outer.Inner`). An extension uses the
-extended type (`Module.Box.Inner`, `Module.Array`).
+name, otherwise the dotted directory path with `src/` removed. The
+manifest is parsed, so a comment is not a target and a parenthesis
+inside a string does not end one. Nested types keep each owner
+(`Module.Outer.Inner`). An extension uses the extended type
+(`Module.Box.Inner`, `Module.Array`).
 """
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 from crapper.languages.treesitter import (
@@ -90,8 +91,7 @@ _FIXED_NAMES = {
     "deinit_declaration": "deinit",
     "subscript_declaration": "subscript",
 }
-_TARGET_MARKERS = (".target(", ".executableTarget(")
-_FIELD = re.compile(r'{name}:\s*"([^"]+)"')
+_TARGET_NAMES = {"target", "executableTarget"}
 
 
 def _is_decision(node) -> bool:
@@ -284,52 +284,92 @@ def _directory_module(path: str, project_root: str | None) -> str:
     return Path(path).stem
 
 
-def _balanced(text: str, open_at: int) -> str:
-    depth = 0
-    for index in range(open_at, len(text)):
-        depth += _paren_delta(text[index])
-        if depth == 0:
-            return text[open_at : index + 1]
-    return ""
+def _string_parts(data: bytes, node, quote: str, text_type: str) -> str | None:
+    parts = []
+    for child in node.children:
+        if child.type == quote:
+            continue
+        if child.type != text_type:
+            return None
+        parts.append(node_text(data, child))
+    return "".join(parts)
 
 
-def _paren_delta(char: str) -> int:
-    if char == "(":
-        return 1
-    if char == ")":
-        return -1
-    return 0
+def _plain_string(data: bytes, node) -> str | None:
+    if node.type == "line_string_literal":
+        return _string_parts(data, node, '"', "line_str_text")
+    if node.type == "multi_line_string_literal":
+        text = _string_parts(data, node, '"""', "multi_line_str_text")
+        if text is None:
+            return None
+        return text.strip()
+    return None
 
 
-def _target_blocks(text: str) -> list[str]:
-    blocks: list[str] = []
-    for marker in _TARGET_MARKERS:
-        start = 0
-        while True:
-            index = text.find(marker, start)
-            if index < 0:
-                break
-            blocks.append(_balanced(text, index + len(marker) - 1))
-            start = index + len(marker)
-    return blocks
-
-
-def _field(block: str, name: str) -> str | None:
-    match = _FIELD.pattern
-    found = re.search(match.format(name=name), block)
-    if found is None:
+def _suffix_name(data: bytes, node) -> str | None:
+    suffix = None
+    for child in node.children:
+        if child.type == "navigation_suffix":
+            suffix = child
+    if suffix is None:
         return None
-    return found.group(1)
+    return child_text(data, suffix, "simple_identifier")
+
+
+def _call_name(data: bytes, node) -> str | None:
+    """The called name. A later `.target` in a fragment is a navigation suffix."""
+
+    callee = child_of_type(node, "prefix_expression", "navigation_expression")
+    if callee is None:
+        return None
+    if callee.type == "prefix_expression":
+        return child_text(data, callee, "simple_identifier")
+    return _suffix_name(data, callee)
+
+
+def _argument_label(data: bytes, argument) -> str | None:
+    marker = child_of_type(argument, "value_argument_label")
+    if marker is None:
+        return None
+    return child_text(data, marker, "simple_identifier")
+
+
+def _labeled_string(data: bytes, call, label: str) -> str | None:
+    suffix = child_of_type(call, "call_suffix")
+    if suffix is None:
+        return None
+    arguments = child_of_type(suffix, "value_arguments")
+    if arguments is None:
+        return None
+    for argument in arguments.children:
+        if argument.type != "value_argument" or _argument_label(data, argument) != label:
+            continue
+        for child in argument.children:
+            text = _plain_string(data, child)
+            if text is not None:
+                return text
+    return None
+
+
+def _target_calls(data: bytes, root) -> list:
+    calls = []
+    for node in descendants(root):
+        if node.type != "call_expression" or _call_name(data, node) not in _TARGET_NAMES:
+            continue
+        calls.append(node)
+    # A fragment chains later calls inside the first, so the outer node starts
+    # at the same byte and ends later. End order is source order.
+    calls.sort(key=lambda node: (node.end_byte, node.start_byte))
+    return calls
 
 
 def _package_targets(text: str) -> list[tuple[str, str | None]]:
+    data, tree = parse(text, "swift")
     found = []
-    for block in _target_blocks(text):
-        if not block.endswith(")"):
-            continue
-        name = _field(block, "name")
+    for node in _target_calls(data, tree.root_node):
+        name = _labeled_string(data, node, "name")
         if name:
-            found.append((name, _field(block, "path")))
+            found.append((name, _labeled_string(data, node, "path")))
     return found
 
 
