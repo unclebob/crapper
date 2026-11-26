@@ -360,7 +360,7 @@ def test_a_function_region_follows_that_functions_filenames():
     assert not entry.line_covered(5)
 
 
-def test_a_region_with_no_function_filenames_is_not_placed_by_unit_index():
+def test_a_region_without_function_filenames_uses_the_unit_file_list():
     text = json.dumps(
         {
             "type": "llvm.coverage.json.export",
@@ -370,14 +370,20 @@ def test_a_region_with_no_function_filenames_is_not_placed_by_unit_index():
                         {"filename": "First.swift"},
                         {"filename": "Second.swift"},
                     ],
-                    "functions": [{"regions": [[4, 1, 5, 1, 1, 0, 0, 0]]}],
+                    "functions": [
+                        {"regions": [[4, 1, 5, 1, 1, 0, 0, 0]]},
+                        {"filenames": [], "regions": [[1, 1, 1, 2, 1, 1, 0, 0]]},
+                    ],
                 }
             ],
         }
     )
     files = parse_swift_coverage(text)
-    assert not files["First.swift"].line_covered(4)
-    assert not files["First.swift"].line_covered(5)
+    assert files["First.swift"].line_covered(4)
+    assert files["First.swift"].line_covered(5)
+    assert not files["First.swift"].line_covered(1)
+    assert files["Second.swift"].regions == [(1, 1, 1)]
+    assert files["Second.swift"].line_covered(1)
     assert not files["Second.swift"].line_covered(5)
 
 
