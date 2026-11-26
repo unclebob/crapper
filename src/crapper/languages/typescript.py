@@ -14,6 +14,7 @@ grammar and these same rules.
 from crapper.languages.treesitter import (
     binary_logic,
     child_of_type,
+    claim_name,
     complexity,
     descendants,
     end_line,
@@ -60,19 +61,32 @@ _ROUTE_METHODS = {
 }
 _CALLBACKS = {"arrow_function", "function_expression"}
 _JS_SUFFIXES = (".jsx", ".mjs", ".cjs", ".js")
+WRAPPERS = frozenset(
+    {
+        "parenthesized_expression",
+        "as_expression",
+        "satisfies_expression",
+        "type_assertion",
+    }
+)
+_WRAPPER_SKIP = frozenset({"type_arguments", "comment"})
 
 
-def _is_decision(node) -> bool:
-    if node.type in _DECISIONS or binary_logic(node):
-        return True
-    if node.type == "binary_expression" and any(child.type == "??" for child in node.children):
-        return True
+def _is_nullish(node) -> bool:
+    if node.type == "binary_expression":
+        return any(child.type == "??" for child in node.children)
     # `a?.b` and `a?.[0]` wrap `?.` in optional_chain. `a?.()` is a bare `?.`
     # in TypeScript and an optional_chain in JavaScript. Count the wrapper
     # once, and a bare token only when nothing wraps it.
     if node.type == "optional_chain":
         return True
-    return node.type == "?." and (node.parent is None or node.parent.type != "optional_chain")
+    if node.type != "?.":
+        return False
+    return node.parent is None or node.parent.type != "optional_chain"
+
+
+def _is_decision(node) -> bool:
+    return node.type in _DECISIONS or binary_logic(node) or _is_nullish(node)
 
 
 def _skip(node) -> bool:
@@ -101,7 +115,7 @@ def _module_namespace(path: str, source_root: str | None) -> str:
     return _strip_script_suffix(relative).replace("/", ".")
 
 
-def _inside_function(node) -> bool:
+def inside_function(node) -> bool:
     current = node.parent
     while current is not None:
         if current.type in _FUNCTION_TYPES:
@@ -123,28 +137,32 @@ def _class_names(data: bytes, node) -> list[str]:
     return names
 
 
-def _has_body(node) -> bool:
+def has_body(node) -> bool:
     return child_of_type(node, "statement_block") is not None
 
 
-def _expression(node):
-    current = node
-    while current is not None and current.type == "parenthesized_expression":
-        current = next(
-            (child for child in current.children if child.type not in {"(", ")"}),
-            None,
-        )
-    return current
-
-
-def _call_callee(call):
-    for child in call.children:
-        if child.type != "arguments":
+def _unwrapped_child(node):
+    for child in node.children:
+        if child.is_named and child.type not in _WRAPPER_SKIP:
             return child
     return None
 
 
-def _property_name(data: bytes, node) -> str | None:
+def unwrap_expression(node):
+    current = node
+    while current is not None and current.type in WRAPPERS:
+        current = _unwrapped_child(current)
+    return current
+
+
+def call_callee(call):
+    for child in call.children:
+        if child.type not in {"arguments", "type_arguments", "comment"}:
+            return child
+    return None
+
+
+def property_name(data: bytes, node) -> str | None:
     if node is None or node.type != "member_expression":
         return None
     ident = child_of_type(node, "property_identifier")
@@ -154,7 +172,7 @@ def _property_name(data: bytes, node) -> str | None:
 
 
 def _route_method(data: bytes, call) -> str | None:
-    name = _property_name(data, _call_callee(call))
+    name = property_name(data, call_callee(call))
     if name is None:
         return None
     lowered = name.lower()
@@ -163,7 +181,7 @@ def _route_method(data: bytes, call) -> str | None:
     return None
 
 
-def _literal_text(data: bytes, node) -> str | None:
+def literal_text(data: bytes, node) -> str | None:
     if node.type == "string":
         return "".join(
             node_text(data, child) for child in node.children if child.type == "string_fragment"
@@ -180,10 +198,10 @@ def _string_argument(data: bytes, call) -> str | None:
     if arguments is None:
         return None
     for child in arguments.children:
-        expr = _expression(child)
+        expr = unwrap_expression(child)
         if expr is None:
             continue
-        text = _literal_text(data, expr)
+        text = literal_text(data, expr)
         if text is not None:
             return text
     return None
@@ -199,8 +217,8 @@ def _path_from_route(data: bytes, node) -> str | None:
             continue
         if current.type != "call_expression":
             return None
-        callee = _call_callee(current)
-        if _property_name(data, callee) == "route":
+        callee = call_callee(current)
+        if property_name(data, callee) == "route":
             return _string_argument(data, current)
         current = callee
     return None
@@ -212,105 +230,139 @@ def _callbacks(call) -> list:
         return []
     found = []
     for child in arguments.children:
-        expr = _expression(child)
+        expr = unwrap_expression(child)
         if expr is not None and expr.type in _CALLBACKS:
             found.append(expr)
     return found
 
 
+def _argument_list_parent(node):
+    current = node.parent
+    while current is not None and current.type in WRAPPERS:
+        current = current.parent
+    if current is not None and current.type == "arguments":
+        return current.parent
+    return None
+
+
 def _is_route_callback(data: bytes, node) -> bool:
     if node.type not in _CALLBACKS:
         return False
-    current = node.parent
-    while current is not None and current.type == "parenthesized_expression":
-        current = current.parent
-    if current is None or current.type != "arguments":
-        return False
-    call = current.parent
+    call = _argument_list_parent(node)
     if call is None or call.type != "call_expression":
         return False
     return _route_method(data, call) is not None
 
 
-def _complexity(data: bytes, node) -> int:
+def script_complexity(data: bytes, node, *, include_routes: bool = True) -> int:
     root_id = node.id
 
     def skip(current) -> bool:
         if current.id == root_id:
             return False
-        return _skip(current) or _is_route_callback(data, current)
+        if _skip(current):
+            return True
+        return include_routes and _is_route_callback(data, current)
 
     return complexity(node, _is_decision, skip)
 
 
-def _append(found: list, node, **kwargs) -> None:
+def append_function(
+    found: list,
+    span_node,
+    body_node,
+    data: bytes,
+    *,
+    name: str,
+    namespace: str,
+    path: str,
+    language: str = "typescript",
+    include_routes: bool = True,
+) -> None:
     found.append(
         (
-            node.start_byte,
-            Function(start_byte=node.start_byte, end_byte=node.end_byte, **kwargs),
+            span_node.start_byte,
+            Function(
+                name=name,
+                namespace=namespace,
+                complexity=script_complexity(data, body_node, include_routes=include_routes),
+                start_line=start_line(span_node),
+                end_line=end_line(span_node),
+                path=path,
+                language=language,
+                start_byte=span_node.start_byte,
+                end_byte=span_node.end_byte,
+            ),
         )
     )
 
 
-def _append_function(found, data, node, module, path) -> None:
-    if _inside_function(node) or not _has_body(node):
+def _append_function(found, data, node, module, path, language, include_routes) -> None:
+    if inside_function(node) or not has_body(node):
         return
     ident = child_of_type(node, "identifier")
     if ident is None:
         return
-    _append(
+    append_function(
         found,
         node,
+        node,
+        data,
         name=node_text(data, ident),
         namespace=module,
-        complexity=_complexity(data, node),
-        start_line=start_line(node),
-        end_line=end_line(node),
         path=path,
-        language="typescript",
+        language=language,
+        include_routes=include_routes,
     )
 
 
-def _append_method(found, data, node, module, path) -> None:
-    if not _has_body(node):
+def _append_method(found, data, node, module, path, language, include_routes) -> None:
+    if not has_body(node):
         return
     ident = child_of_type(node, "property_identifier", "identifier")
     classes = _class_names(data, node)
     if ident is None or not classes:
         return
-    _append(
+    append_function(
         found,
         node,
+        node,
+        data,
         name=node_text(data, ident),
         namespace=f"{module}.{'.'.join(classes)}",
-        complexity=_complexity(data, node),
-        start_line=start_line(node),
-        end_line=end_line(node),
         path=path,
-        language="typescript",
+        language=language,
+        include_routes=include_routes,
     )
 
 
-def _append_arrows(found, data, node, module, path) -> None:
-    if _inside_function(node):
+def _declarator_callback(declarator):
+    if declarator.type != "variable_declarator":
+        return None, None
+    ident = child_of_type(declarator, "identifier")
+    value = unwrap_expression(declarator.child_by_field_name("value"))
+    if ident is None or value is None or value.type not in _CALLBACKS:
+        return None, None
+    return ident, value
+
+
+def _append_arrows(found, data, node, module, path, language, include_routes) -> None:
+    if inside_function(node):
         return
     for declarator in node.children:
-        if declarator.type != "variable_declarator":
+        ident, value = _declarator_callback(declarator)
+        if ident is None:
             continue
-        ident = child_of_type(declarator, "identifier")
-        value = child_of_type(declarator, "arrow_function", "function_expression")
-        if ident is None or value is None:
-            continue
-        _append(
+        append_function(
             found,
             declarator,
+            value,
+            data,
             name=node_text(data, ident),
             namespace=module,
-            complexity=_complexity(data, value),
-            start_line=start_line(declarator),
-            end_line=end_line(declarator),
             path=path,
-            language="typescript",
+            language=language,
+            include_routes=include_routes,
         )
 
 
@@ -319,18 +371,6 @@ def _route_label(method: str, path: str | None) -> str:
     if path:
         return f"{label} {path}"
     return label
-
-
-def _claim(used: set[str], name: str) -> str:
-    if name not in used:
-        used.add(name)
-        return name
-    number = 2
-    while f"{name}#{number}" in used:
-        number += 1
-    chosen = f"{name}#{number}"
-    used.add(chosen)
-    return chosen
 
 
 def _collect_routes(routes: list, data: bytes, call) -> None:
@@ -342,25 +382,52 @@ def _collect_routes(routes: list, data: bytes, call) -> None:
         return
     route = _string_argument(data, call)
     if not route:
-        route = _path_from_route(data, _call_callee(call))
+        route = _path_from_route(data, call_callee(call))
     for callback in callbacks:
         routes.append((callback.start_byte, callback, method, route))
 
 
-def _append_routes(found, routes, data, module, path) -> None:
+def _append_routes(found, routes, data, module, path, language) -> None:
     used: set[str] = set()
     for _start, callback, method, route in sorted(routes, key=lambda item: item[0]):
-        _append(
+        append_function(
             found,
             callback,
-            name=_claim(used, _route_label(method, route)),
+            callback,
+            data,
+            name=claim_name(used, _route_label(method, route)),
             namespace=module,
-            complexity=_complexity(data, callback),
-            start_line=start_line(callback),
-            end_line=end_line(callback),
             path=path,
-            language="typescript",
+            language=language,
         )
+
+
+def _collect_node(found, routes, data, node, module, path, language, include_routes) -> None:
+    if node.type == "function_declaration":
+        _append_function(found, data, node, module, path, language, include_routes)
+    elif node.type == "method_definition":
+        _append_method(found, data, node, module, path, language, include_routes)
+    elif node.type == "lexical_declaration":
+        _append_arrows(found, data, node, module, path, language, include_routes)
+    elif include_routes and node.type == "call_expression":
+        _collect_routes(routes, data, node)
+
+
+def extract_tree_functions(
+    data: bytes,
+    root,
+    module: str,
+    path: str,
+    *,
+    language: str = "typescript",
+    include_routes: bool = True,
+) -> list[tuple[int, Function]]:
+    found: list[tuple[int, Function]] = []
+    routes: list[tuple[int, object, str, str | None]] = []
+    for node in descendants(root):
+        _collect_node(found, routes, data, node, module, path, language, include_routes)
+    _append_routes(found, routes, data, module, path, language)
+    return found
 
 
 def functions_in_source(
@@ -368,17 +435,6 @@ def functions_in_source(
 ) -> list[Function]:
     data, tree = parse(source, _grammar(path))
     module = _module_namespace(path, source_root)
-    found: list[tuple[int, Function]] = []
-    routes: list[tuple[int, object, str, str | None]] = []
-    for node in descendants(tree.root_node):
-        if node.type == "function_declaration":
-            _append_function(found, data, node, module, path)
-        elif node.type == "method_definition":
-            _append_method(found, data, node, module, path)
-        elif node.type == "lexical_declaration":
-            _append_arrows(found, data, node, module, path)
-        elif node.type == "call_expression":
-            _collect_routes(routes, data, node)
-    _append_routes(found, routes, data, module, path)
+    found = extract_tree_functions(data, tree.root_node, module, path)
     found.sort(key=lambda item: item[0])
     return [function for _, function in found]

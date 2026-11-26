@@ -7,6 +7,7 @@ _SOURCES = [
     ("java", "class Board { void place() { if (true) return; } }\n", "Board.java", "place"),
     ("go", "package demo\nfunc Place() int { return 1 }\n", "board.go", "Place"),
     ("typescript", "export function view() { return 1 }\n", "src/ui.ts", "view"),
+    ("vue", '<script setup lang="ts">\nexport function view() { return 1 }\n</script>\n', "src/View.vue", "view"),
     ("python", "def run():\n    return 1\n", "src/app.py", "run"),
     ("rust", "pub fn open() {}\n", "src/lib.rs", "open"),
     ("swift", "func open() {}\n", "Sources/Demo/Box.swift", "open"),

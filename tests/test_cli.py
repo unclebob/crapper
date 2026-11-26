@@ -32,6 +32,10 @@ def test_language_detection():
     assert is_test_file("app.test.cts") is True
     assert is_test_file("app.spec.cts") is True
     assert is_test_file("app.cts") is False
+    assert language_of("Card.vue") == "vue"
+    assert is_test_file("Card.test.vue") is True
+    assert is_test_file("Card.spec.vue") is True
+    assert is_test_file("Card.vue") is False
 
 
 def _write(root: Path, relative: str, source: str) -> None:
@@ -165,6 +169,8 @@ def test_help_and_unknown_option(capsys):
     assert "uml-viewer" in help_text
     assert ".clj-kondo" in help_text
     assert ".test.cts" in help_text
+    assert ".test.vue" in help_text
+    assert "Vue (.vue)" in help_text
     assert ".swift" in help_text
     assert "Module.Type" in help_text
     assert run(["--not-an-option"]) == 1

@@ -1,6 +1,6 @@
 # crapper
 
-CRAP scores for Clojure, Java, Go, TypeScript, Rust, Python, and Swift. One run detects the language of each source file, applies that language's complexity and coverage rules, and writes the snapshot [uml-viewer](https://github.com/unclebob/uml-viewer) already reads.
+CRAP scores for Clojure, Java, Go, TypeScript, Vue, Rust, Python, and Swift. One run detects the language of each source file, applies that language's complexity and coverage rules, and writes the snapshot [uml-viewer](https://github.com/unclebob/uml-viewer) already reads.
 
 The formula is the one from [crap4clj](https://github.com/unclebob/crap4clj), [crap4java](https://github.com/unclebob/crap4java), and [crap4go](https://github.com/unclebob/crap4go):
 
@@ -50,6 +50,7 @@ uml-viewer groups entries by `:namespace` and joins each operation on `:name`. `
 | Java | `package.Class`, or `package.Outer.Inner` | the method name |
 | Go | the package import path, or `import/path.Receiver` | the function or method name |
 | TypeScript | the dotted module path, or `module.Class` | the function or method name |
+| Vue | the dotted component path, or `module.Class` | the function, hook, or option handler name |
 | Rust | `crate::module`, or `crate::module::Type` | the function or method name |
 | Python | the dotted module path, or `module.Class` | the function or method name |
 | Swift | the module, or `Module.Type` | the function, method, initializer, subscript, or property |
@@ -65,6 +66,8 @@ Java follows crap4java: `if`, loops, `catch`, `?:`, each `switch` label, and `&&
 Go follows crap4go: `if`, `for`, `range`, each `switch` and `select` clause, and `&&` / `||`. Coverage is `go test -coverprofile`, which names each file by its module import path (the `module` line of the nearest `go.mod` plus the path inside that module). crapper and mutator look a file up by that name first, then by the longest matching path suffix.
 
 TypeScript, TSX, and JavaScript (`.js`, `.jsx`, `.mjs`, `.cjs`) use the same structural decisions as Java, including `&&` inside JSX, plus `??` and `?.`. Top-level functions, class methods, and top-level arrow functions are entries. An inline Express callback — `.get`, `.post`, `.put`, `.patch`, `.delete`, `.head`, `.options`, `.all`, `.use`, and `.route(path).get(...)` — is its own entry, named `GET /users`. A second callback on that same route is `GET /users#2`. Its decisions are not also charged to the enclosing function. Other nested callbacks stay inside the enclosing function. Coverage is LCOV. When the report has branch records (`BRDA`) inside a function, the score uses those branches; a function with no branches uses line hits. A `coverage` script is used as-is. A Vitest project runs `vitest --coverage` (installing `@vitest/coverage-v8` into `node_modules` when it is missing, without editing `package.json`). Other test scripts are wrapped in `c8`.
+
+Vue (`.vue`) extracts each inline `<script>` and `<script setup>` block (skipping `src`, empty, comment, and unsupported `lang` blocks) and parses it with the matching JavaScript, TypeScript, or TSX grammar while preserving original `.vue` line and byte coordinates. Decisions follow the TypeScript rules without Express route extraction. Top-level functions, class methods, top-level arrow functions, Options API handlers (`methods`, `computed`, `watch`, lifecycle hooks, `data`, `setup`, `render`, and `export default` or `defineComponent` functions), and top-level Composition API hooks (`computed`, `watch`, `watchEffect` variants, and lifecycle hooks) are entries. Coverage uses the same LCOV pipeline as TypeScript and runs Vitest or `c8` once per package.
 
 Rust counts `if`, loops, each `match` arm, `?`, and `&&` / `||`. `mod tests` is skipped. Coverage is LCOV from `cargo llvm-cov` or `cargo tarpaulin`, run in the nearest directory that contains `Cargo.toml`. When neither tool is installed, the run installs `cargo-llvm-cov`.
 
@@ -86,6 +89,7 @@ By default a run deletes the previous report for each language it is about to me
 | Java | JaCoCo Maven plugin `0.8.12` in each module with `pom.xml` | `target/site/jacoco/jacoco.xml` |
 | Go | `go test ./... -coverprofile=...` | `target/coverage/go/coverage.out` |
 | TypeScript | `npm run coverage`, or Vitest `--coverage`, or `npx c8 ... npm test` | `coverage/lcov.info` or `target/coverage/typescript/lcov.info` |
+| Vue | `npm run coverage`, or Vitest `--coverage`, or `npx c8 ... npm test` | `coverage/lcov.info` or `target/coverage/typescript/lcov.info` |
 | Rust | `cargo llvm-cov` or `cargo tarpaulin`, per Cargo package | `target/coverage/rust/lcov.info` |
 | Python | `coverage run` with pytest or unittest, then `coverage lcov` | `target/coverage/python/lcov.info` |
 | Swift | `swift test --enable-code-coverage`, then `llvm-cov export` (JSON by default); or `xcodebuild test -enableCodeCoverage YES` and `xcrun xccov view --report --json` | `target/coverage/swift/**/*.json` |

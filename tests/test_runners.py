@@ -691,3 +691,72 @@ def test_python_and_rust_reports_are_created_again(tmp_path, monkeypatch, capsys
 def test_a_successful_custom_coverage_command_is_quiet(tmp_path, capsys):
     assert run_coverage(tmp_path, [], "true") == 0
     assert "exited" not in capsys.readouterr().err
+
+
+def test_mixed_typescript_and_vue_runs_vitest_once(tmp_path, monkeypatch):
+    _write(
+        tmp_path,
+        "package.json",
+        json.dumps({"scripts": {"test": "vitest run"}}),
+    )
+    _write(tmp_path, "vitest.config.ts", "export default {}\n")
+    (tmp_path / "node_modules" / "@vitest" / "coverage-v8").mkdir(parents=True)
+    ts_file = _write(tmp_path, "src/book.ts", "export function plan() { return 1 }\n")
+    vue_file = _write(
+        tmp_path,
+        "src/Card.vue",
+        '<script setup lang="ts">\nfunction open() { return 1 }\n</script>\n',
+    )
+    vue_test = _write(
+        tmp_path,
+        "src/Card.test.vue",
+        '<script setup lang="ts">\nfunction check() {}\n</script>\n',
+    )
+    vue_spec = _write(
+        tmp_path,
+        "src/Card.spec.vue",
+        '<script setup lang="ts">\nfunction checkSpec() {}\n</script>\n',
+    )
+    files = [ts_file, vue_file, vue_test, vue_spec]
+    assert typescript_packages(tmp_path, files) == [tmp_path.resolve()]
+
+    report_dir = tmp_path / "target" / "coverage" / "typescript"
+    command = typescript_command(tmp_path, files, report_dir)
+    assert command is not None
+    text = _as_text(command)
+    assert "--coverage.include=src/book.ts" in text
+    assert "--coverage.include=src/Card.vue" in text
+    assert "Card.test.vue" not in text
+    assert "Card.spec.vue" not in text
+
+    commands: list[list[str]] = []
+    monkeypatch.setattr(
+        "crapper.runners.run_shell",
+        lambda cmd, cwd: commands.append(list(cmd)) or 0,
+    )
+    assert run_coverage(tmp_path, [ts_file, vue_file], None) == 0
+    assert len(commands) == 1
+    assert "vitest" in _as_text(commands[0])
+
+
+def test_vue_only_package_runs_vitest_once(tmp_path, monkeypatch):
+    _write(
+        tmp_path,
+        "package.json",
+        json.dumps({"scripts": {"test": "vitest run"}}),
+    )
+    (tmp_path / "node_modules" / "@vitest" / "coverage-v8").mkdir(parents=True)
+    vue_file = _write(
+        tmp_path,
+        "src/Card.vue",
+        '<script setup lang="ts">\nfunction open() { return 1 }\n</script>\n',
+    )
+    assert typescript_packages(tmp_path, [vue_file]) == [tmp_path.resolve()]
+    commands: list[list[str]] = []
+    monkeypatch.setattr(
+        "crapper.runners.run_shell",
+        lambda cmd, cwd: commands.append(list(cmd)) or 0,
+    )
+    assert run_coverage(tmp_path, [vue_file], None) == 0
+    assert len(commands) == 1
+    assert "--coverage.include=src/Card.vue" in _as_text(commands[0])

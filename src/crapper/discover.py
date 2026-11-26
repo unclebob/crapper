@@ -21,6 +21,7 @@ EXTENSIONS = {
     ".rs": "rust",
     ".py": "python",
     ".swift": "swift",
+    ".vue": "vue",
 }
 
 SKIP_DIRS = {
@@ -68,6 +69,13 @@ JS_TEST_SUFFIXES = (
     ".test.cjs",
     ".spec.cjs",
 )
+VUE_TEST_SUFFIXES = (".test.vue", ".spec.vue")
+_TEST_SUFFIXES = (
+    GO_TEST_SUFFIX,
+    *CLOJURE_TEST_SUFFIXES,
+    *JS_TEST_SUFFIXES,
+    *VUE_TEST_SUFFIXES,
+)
 
 
 def language_of(path: str | Path) -> str | None:
@@ -88,20 +96,18 @@ def _swift_test(file_path: Path) -> bool:
     return any(part.endswith("Tests") for part in file_path.parts)
 
 
+def _python_test(name: str) -> bool:
+    if name == "conftest.py":
+        return True
+    return name.endswith("_test.py") or (name.startswith("test_") and name.endswith(".py"))
+
+
 def is_test_file(path: str | Path) -> bool:
     file_path = Path(path)
     name = file_path.name
-    if name.endswith(GO_TEST_SUFFIX):
+    if name.endswith(_TEST_SUFFIXES):
         return True
-    if name.endswith(CLOJURE_TEST_SUFFIXES):
-        return True
-    if name.endswith(JS_TEST_SUFFIXES):
-        return True
-    if name == "conftest.py":
-        return True
-    if name.endswith("_test.py") or (name.startswith("test_") and name.endswith(".py")):
-        return True
-    if _swift_test(file_path):
+    if _python_test(name) or _swift_test(file_path):
         return True
     return any(part in TEST_DIRS for part in file_path.parts)
 
