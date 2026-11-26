@@ -317,6 +317,13 @@ def _snapshot(tmp_path: Path) -> str:
     return (tmp_path / ".metrics" / "crap.edn").read_text(encoding="utf-8")
 
 
+def _xccov_snapshot(tmp_path: Path, report: dict) -> str:
+    _swift_project(tmp_path, "xccov.json")
+    destination = tmp_path / "target" / "coverage" / "swift" / "xccov.json"
+    destination.write_text(json.dumps(report), encoding="utf-8")
+    return _snapshot(tmp_path)
+
+
 def test_llvm_cov_regions_join_the_swift_snapshot(tmp_path):
     _swift_project(tmp_path, "llvm-cov.json")
     text = _snapshot(tmp_path)
@@ -331,11 +338,142 @@ def _llvm_regions(filename: str, regions: list) -> str:
             "data": [
                 {
                     "files": [{"filename": filename}],
-                    "functions": [{"regions": regions}],
+                    "functions": [{"filenames": [filename], "regions": regions}],
                 }
             ],
         }
     )
+
+
+def test_a_function_region_follows_that_functions_filenames():
+    text = (_FIXTURES / "function-filenames.json").read_text(encoding="utf-8")
+    files = parse_swift_coverage(text)
+    place = files["/proj/Sources/Demo/Place.swift"]
+    entry = files["/proj/DerivedSources/test_entry_point.swift"]
+    assert place.regions == [(4, 5, 1)]
+    assert entry.regions == [(1, 1, 1)]
+    assert place.line_covered(4)
+    assert place.line_covered(5)
+    assert not place.line_covered(1)
+    assert entry.line_covered(1)
+    assert not entry.line_covered(4)
+    assert not entry.line_covered(5)
+
+
+def test_a_region_with_no_function_filenames_is_not_placed_by_unit_index():
+    text = json.dumps(
+        {
+            "type": "llvm.coverage.json.export",
+            "data": [
+                {
+                    "files": [
+                        {"filename": "First.swift"},
+                        {"filename": "Second.swift"},
+                    ],
+                    "functions": [{"regions": [[4, 1, 5, 1, 1, 0, 0, 0]]}],
+                }
+            ],
+        }
+    )
+    files = parse_swift_coverage(text)
+    assert not files["First.swift"].line_covered(4)
+    assert not files["First.swift"].line_covered(5)
+    assert not files["Second.swift"].line_covered(5)
+
+
+def test_a_region_file_id_outside_the_function_filenames_is_ignored():
+    text = json.dumps(
+        {
+            "type": "llvm.coverage.json.export",
+            "data": [
+                {
+                    "files": [
+                        {"filename": "Other.swift"},
+                        {"filename": "Place.swift"},
+                    ],
+                    "functions": [
+                        {
+                            "filenames": ["Place.swift"],
+                            "regions": [[4, 1, 5, 1, 1, 1, 0, 0]],
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    files = parse_swift_coverage(text)
+    assert not files["Other.swift"].line_covered(5)
+    assert not files["Place.swift"].line_covered(4)
+    assert not files["Place.swift"].line_covered(5)
+
+
+def test_an_empty_function_filename_does_not_receive_the_region():
+    text = json.dumps(
+        {
+            "type": "llvm.coverage.json.export",
+            "data": [
+                {
+                    "files": [{"filename": "Place.swift"}],
+                    "functions": [
+                        {
+                            "filenames": ["", "Place.swift"],
+                            "regions": [
+                                [4, 1, 5, 1, 1, 0, 0, 0],
+                                [2, 1, 2, 1, 1, 1, 0, 0],
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    files = parse_swift_coverage(text)
+    assert "" not in files
+    assert files["Place.swift"].regions == [(2, 2, 1)]
+    assert files["Place.swift"].line_covered(2)
+    assert not files["Place.swift"].line_covered(5)
+
+
+def test_a_function_filename_absent_from_the_unit_still_keeps_its_region():
+    text = json.dumps(
+        {
+            "type": "llvm.coverage.json.export",
+            "data": [
+                {
+                    "files": [{"filename": "Other.swift"}],
+                    "functions": [
+                        {
+                            "filenames": ["Place.swift"],
+                            "regions": [[4, 1, 5, 1, 1, 0, 0, 0]],
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    files = parse_swift_coverage(text)
+    assert files["Place.swift"].regions == [(4, 5, 1)]
+    assert files["Place.swift"].line_covered(5)
+    assert not files["Other.swift"].line_covered(5)
+
+
+def test_a_unit_file_with_an_empty_name_is_skipped():
+    text = json.dumps(
+        {
+            "data": [
+                {
+                    "files": [
+                        {"filename": "", "segments": [[1, 1, 1, True, True, False]]},
+                        {"filename": "Place.swift", "segments": [[2, 1, 1, True, True, False]]},
+                    ],
+                    "functions": [],
+                }
+            ]
+        }
+    )
+    files = parse_swift_coverage(text)
+    assert "" not in files
+    assert files["Place.swift"].line_covered(2)
 
 
 def test_a_region_records_its_end_line_and_covers_that_span():
@@ -393,6 +531,24 @@ def test_a_segment_region_is_a_single_line():
     )
     short = parse_swift_coverage(text)["Short.swift"]
     assert short.regions == [(2, 2, 1)]
+    text = json.dumps(
+        {
+            "data": [
+                {
+                    "files": [
+                        {
+                            "filename": "Gap.swift",
+                            "segments": [[2, 5, 1, True, False]],
+                        }
+                    ],
+                    "functions": [],
+                }
+            ]
+        }
+    )
+    gap = parse_swift_coverage(text)["Gap.swift"]
+    assert gap.regions == []
+    assert not gap.line_covered(2)
     text = (_FIXTURES / "segments.json").read_text(encoding="utf-8")
     record = parse_swift_coverage(text)["Sources/Demo/Box.swift"]
     assert (2, 2, 1) in record.regions
@@ -405,6 +561,45 @@ def test_a_segment_region_is_a_single_line():
 def test_an_xccov_summary_does_not_mark_a_line_covered():
     record = SwiftFile(summaries=[(2, 1, 1)])
     assert record.line_covered(2) is False
+
+
+def test_an_xccov_file_with_an_empty_name_is_skipped():
+    text = json.dumps(
+        {
+            "files": [
+                {
+                    "name": "",
+                    "functions": [{"lineNumber": 1, "coveredLines": 1, "executableLines": 1}],
+                },
+                {
+                    "path": "Sources/Demo/Box.swift",
+                    "functions": [{"lineNumber": 1, "coveredLines": 1, "executableLines": 2}],
+                },
+            ]
+        }
+    )
+    files = parse_swift_coverage(text)
+    assert "" not in files
+    assert files["Sources/Demo/Box.swift"].summaries == [(1, 1, 2)]
+
+
+def test_an_xccov_function_missing_either_count_is_ignored():
+    text = json.dumps(
+        {
+            "files": [
+                {
+                    "path": "Place.swift",
+                    "functions": [
+                        {"lineNumber": 4, "coveredLines": 1},
+                        {"executableLines": 1, "coveredLines": 1},
+                        {"lineNumber": 2, "executableLines": 1, "coveredLines": 1},
+                    ],
+                }
+            ]
+        }
+    )
+    record = parse_swift_coverage(text)["Place.swift"]
+    assert record.summaries == [(2, 1, 1)]
 
 
 def test_a_spanning_region_still_counts_once_toward_crap(tmp_path):
@@ -1088,6 +1283,24 @@ def test_an_xccov_function_without_counts_is_uncovered(tmp_path):
     function["executableLines"] = "nope"
     destination.write_text(json.dumps(report), encoding="utf-8")
     assert ':name "choose", :namespace "Demo", :complexity 2, :coverage 0.0, :crap 6.0' in _snapshot(tmp_path)
+
+
+def test_an_xccov_summary_on_the_last_line_still_scores_the_function(tmp_path):
+    report = json.loads((_FIXTURES / "xccov.json").read_text(encoding="utf-8"))
+    report["targets"][0]["files"][0]["functions"][1]["lineNumber"] = 11
+    text = _xccov_snapshot(tmp_path, report)
+    assert ':name "open", :namespace "Demo.Box", :complexity 1, :coverage 100.0, :crap 1.0' in text
+
+
+def test_the_earliest_xccov_summary_inside_the_function_scores_it(tmp_path):
+    report = json.loads((_FIXTURES / "xccov.json").read_text(encoding="utf-8"))
+    report["targets"][0]["files"][0]["functions"] = [
+        {"coveredLines": 2, "executableLines": 2, "lineNumber": 1, "name": "choose(x:)"},
+        {"coveredLines": 0, "executableLines": 2, "lineNumber": 4, "name": "later"},
+        {"coveredLines": 1, "executableLines": 1, "lineNumber": 9, "name": "Box.open()"},
+    ]
+    text = _xccov_snapshot(tmp_path, report)
+    assert ':name "choose", :namespace "Demo", :complexity 2, :coverage 100.0, :crap 2.0' in text
 
 
 def test_xccov_report_joins_on_the_function_line(tmp_path):

@@ -164,6 +164,23 @@ def test_a_shorter_file_does_not_take_a_longer_files_coverage():
     assert bundle.percent_for(long) == 100.0
 
 
+def test_an_unrelated_longer_source_does_not_block_a_suffix_match(tmp_path):
+    body = "package demo\nfunc Place() int { return 1 }\n"
+    covered = tmp_path / "pkg" / "app.go"
+    other = tmp_path / "other" / "long" / "name.go"
+    covered.parent.mkdir(parents=True)
+    other.parent.mkdir(parents=True)
+    covered.write_text(body, encoding="utf-8")
+    other.write_text(body, encoding="utf-8")
+    bundle = CoverageBundle(
+        go_profile=parse_go_profile("mode: set\nproj/src/pkg/app.go:1.1,2.2 1 1\n")
+    )
+    entries = analyze_files([covered, other], tmp_path, bundle)
+    by_path = {entry.path: entry.coverage for entry in entries}
+    assert by_path["pkg/app.go"] == 100.0
+    assert by_path["other/long/name.go"] == 0.0
+
+
 def test_an_equal_report_key_blocks_a_longer_file():
     bundle = CoverageBundle(
         go_profile=parse_go_profile("mode: set\n/data/board.go:1.1,2.2 1 1\n")
